@@ -191,6 +191,20 @@ CREATE TABLE ${DEV_CH_DB}.$table (     \`probe_protocol\` UInt8,     \`probe_dst
 EOF
 }
 
+# 
+# Note that after the data XXX (find the date) the measurements are no longer using the following 
+# column names (no other column is added). So the following columns are commented. If you want to 
+# get a table which is older than that date, then uncomment the lines in the creation script.
+# If you already created those, you can simply ignore them.
+#    'destination_host_reply',
+#    'private_probe_dst_prefix',
+#    'destination_prefix_reply',
+#    'probe_dst_prefix',
+#    'time_exceeded_reply',
+#    'reply_src_prefix',
+#    'valid_probe_protocol',
+#    'private_reply_src_addr'
+#
 results_sql() {
 	local table="$1"
 
@@ -213,20 +227,20 @@ CREATE TABLE ${DEV_CH_DB}.$table (
     \\\`reply_mpls_labels\\\` Array(Tuple(UInt32, UInt8, UInt8, UInt8)),
     \\\`rtt\\\` UInt16,
     \\\`round\\\` UInt8,
-    \\\`probe_dst_prefix\\\` IPv6,
-    \\\`reply_src_prefix\\\` IPv6,
-    \\\`private_probe_dst_prefix\\\` UInt8,
-    \\\`private_reply_src_addr\\\` UInt8,
-    \\\`destination_host_reply\\\` UInt8,
-    \\\`destination_prefix_reply\\\` UInt8,
-    \\\`valid_probe_protocol\\\` UInt8,
-    \\\`time_exceeded_reply\\\` UInt8
+    -- \\\`probe_dst_prefix\\\` IPv6,
+    -- \\\`reply_src_prefix\\\` IPv6,
+    -- \\\`private_probe_dst_prefix\\\` UInt8,
+    -- \\\`private_reply_src_addr\\\` UInt8,
+    -- \\\`destination_host_reply\\\` UInt8,
+    -- \\\`destination_prefix_reply\\\` UInt8,
+    -- \\\`valid_probe_protocol\\\` UInt8,
+    -- \\\`time_exceeded_reply\\\` UInt8
 )
 ENGINE = MergeTree
 ORDER BY (
     probe_protocol,
     probe_src_addr,
-    probe_dst_prefix,
+    -- probe_dst_prefix,
     probe_dst_addr,
     probe_src_port,
     probe_dst_port,
