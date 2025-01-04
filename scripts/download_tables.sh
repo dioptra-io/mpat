@@ -12,6 +12,8 @@ readonly LOCAL_DIR="data" # downloaded tables saved here
 main() {
 	local input
 	local i
+	local num_rows
+    local num_chunks
 
 	if [[ $# -ne 1 ]]; then
 		echo "$0: missing argument"
@@ -21,12 +23,27 @@ main() {
 
 	i=0
 	while read -r table; do
-		download_prod_table "$i" "$table"
-		upload_dev_table "$i" "$table"
+        num_rows=$(get_number_of_rows "$i" "$table")
+        num_chunks=$((num_rows / CHUNK_SIZE))
+
+		download_prod_table "$i" "$table" "$num_rows" "$num_chunks"
+		upload_dev_table "$i" "$table" "$num_chunks"
 		i=$((i + 1))
 	done < "$input"
 	wait 
 	echo_log "Finished"
+}
+
+get_number_of_rows() {
+	local process_id="$1"
+	local table="$2"
+	local num_rows
+	local num_chunks
+
+	# compute the number of chunks
+	num_rows=$(curl -X POST -s --user "$PROD_CH_USER:$PROD_CH_PASSWD" -d "SELECT count(*) FROM ${PROD_CH_DB}.$table FORMAT CSV" "$PROD_CH_URL" --output -)
+
+    echo "$num_rows"
 }
 
 #
@@ -37,20 +54,27 @@ main() {
 download_prod_table() {
 	local process_id="$1"
 	local table="$2"
-	local num_rows
-	local num_chunks
-
-	# compute the number of chunks
-	num_rows=$(curl -X POST -s --user "$PROD_CH_USER:$PROD_CH_PASSWD" -d "SELECT count(*) FROM ${PROD_CH_DB}.$table FORMAT CSV" "$PROD_CH_URL" --output -)
-	num_chunks=$((num_rows / CHUNK_SIZE))
+	local num_rows="$3"
+	local num_chunks="$4"
+    local chunk_of
 
 	echo_log "P$process_id  starting to download $table"
-	for chunk_num in $(seq 0 1 $num_chunks); do
-		download_prod_table_chunk "$process_id" "$table" "$chunk_num" "$num_chunks"
+    i=0
+	for chunk_num in $(seq 0 1 "$num_chunks"); do
+        chunk_of=$(calculate_chunk_of "$num_chunks" "$i")
+		download_prod_table_chunk "$process_id" "$table" "$chunk_num" "$num_chunks" "$chunk_of"
+        i=$((i + 1))
 	done
 	echo_log "P$process_id completed downloading $table"
 }
 
+# Receves $num_chunks $current_chunk
+calculate_chunk_of() {
+ 	local num_chunks=$1
+	local i=$2
+	local chunk_of="$((i)) / $num_chunks"   
+    echo "$chunk_of"
+}
 #
 # This function downloads a table from the Iris production server
 # and saves it in a local file.
@@ -60,14 +84,15 @@ download_prod_table_chunk() {
 	local table=$2
 	local chunk_num=$3
 	local num_chunks=$4
-	local chunk_of="$((chunk_num + 1)) / $num_chunks"
+	local chunk_of=$5
 	local offset=$((chunk_num * CHUNK_SIZE))
 	local local_file
 
 	mkdir -p "${LOCAL_DIR}"
 	local_file="${LOCAL_DIR}/${table}.${offset}.parquet"
 	if [[ -f "${local_file}" ]]; then
-		echo_log "P$process_id ${local_file} already exists"
+		# echo_log "P$process_id ${local_file} already exists"
+        echo_log "P$process_id already downloaded chunk $chunk_of of $table"
 		return 0
 	fi
 	if ! curl -s -X POST -o "${local_file}" \
@@ -91,6 +116,8 @@ download_prod_table_chunk() {
 upload_dev_table() {
 	local process_id="$1"
 	local table="$2"
+	local num_chunks=$3
+	local chunk_of
 	local create_sql
 	local load_sql
 
@@ -101,19 +128,31 @@ upload_dev_table() {
 	*results__*) create_sql=$(results_sql "${table}");;
 	*) echo "${table}: unknown table"; return 1;;
 	esac
+    i=0
 	if [[ -z "${DEV_SSH_USER+x}" ]]; then
-		clickhouse client --user "${DEV_CH_USER}" --password "${DEV_CH_PASSWD}" -q "${create_sql//\\/}"
+        if ! clickhouse client --user "${DEV_CH_USER}" --password "${DEV_CH_PASSWD}" -q "${create_sql//\\/}" 2>/dev/null; then
+            echo_log "P$process_id table already exists for $table skipping"
+            return 1
+        fi
+
 		load_sql="INSERT INTO ${DEV_CH_DB}.${table} FORMAT Parquet"
 		for t in "${LOCAL_DIR}/${table}"*; do
+            chunk_of="$((i)) / $num_chunks"
 			clickhouse client --user "${DEV_CH_USER}" --password "${DEV_CH_PASSWD}" -q "${load_sql}" < "${t}"
-            echo_log "P$process_id finished uploading chunk $chunk_of of $table"
+            echo_log "P$process_id finished uploading chunk ${chunk_of} of $table"
+            i=$((i + 1))
 		done
 	else
-		ssh "${DEV_SSH_USER}@${IRIS_DEV_HOSTNAME}" clickhouse-client --user "${DEV_CH_USER}" --password "${DEV_CH_PASSWD}" -q \""${create_sql}"\"
+		if ! ssh "${DEV_SSH_USER}@${IRIS_DEV_HOSTNAME}" clickhouse-client --user "${DEV_CH_USER}" --password "${DEV_CH_PASSWD}" -q \""${create_sql}"\" 2>/dev/null; then
+            echo_log "P$process_id table already exists for $table skipping"
+            return 1
+        fi
 		load_sql="INSERT INTO ${DEV_CH_DB}.${table} FORMAT Parquet"
 		for t in "${LOCAL_DIR}/${table}"*; do
+            chunk_of="$((i)) / $num_chunks"
 			ssh "${DEV_SSH_USER}@${IRIS_DEV_HOSTNAME}" clickhouse-client --user "${DEV_CH_USER}" --password "${DEV_CH_PASSWD}" -q \""${load_sql}"\" < "${t}"
-            echo_log "P$process_id finished uploading chunk $chunk_of of $table"
+            echo_log "P$process_id finished uploading chunk ${chunk_of} of $table"
+            i=$((i + 1))
 		done
 	fi
 
@@ -131,7 +170,7 @@ links_sql() {
 	local table="$1"
 
 	cat <<EOF
-CREATE TABLE IF NOT EXISTS ${DEV_CH_DB}.$table (     \`probe_protocol\` UInt8,     \`probe_src_addr\` IPv6,     \`probe_dst_prefix\` IPv6,     \`probe_dst_addr\` IPv6,     \`probe_src_port\` UInt16,     \`probe_dst_port\` UInt16,     \`near_round\` UInt8,     \`far_round\` UInt8,     \`near_ttl\` UInt8,     \`far_ttl\` UInt8,     \`near_addr\` IPv6,     \`far_addr\` IPv6 ) ENGINE = MergeTree ORDER BY (probe_protocol, probe_src_addr, probe_dst_prefix, probe_dst_addr, probe_src_port, probe_dst_port) SETTINGS index_granularity = 8192
+CREATE TABLE ${DEV_CH_DB}.$table (     \`probe_protocol\` UInt8,     \`probe_src_addr\` IPv6,     \`probe_dst_prefix\` IPv6,     \`probe_dst_addr\` IPv6,     \`probe_src_port\` UInt16,     \`probe_dst_port\` UInt16,     \`near_round\` UInt8,     \`far_round\` UInt8,     \`near_ttl\` UInt8,     \`far_ttl\` UInt8,     \`near_addr\` IPv6,     \`far_addr\` IPv6 ) ENGINE = MergeTree ORDER BY (probe_protocol, probe_src_addr, probe_dst_prefix, probe_dst_addr, probe_src_port, probe_dst_port) SETTINGS index_granularity = 8192
 EOF
 }
 
@@ -139,7 +178,7 @@ prefixes_sql() {
 	local table="$1"
 
 	cat <<EOF
-CREATE TABLE IF NOT EXISTS ${DEV_CH_DB}.$table (     \`probe_protocol\` UInt8,     \`probe_src_addr\` IPv6,     \`probe_dst_prefix\` IPv6,     \`has_amplification\` UInt8,     \`has_loops\` UInt8 ) ENGINE = MergeTree ORDER BY (probe_protocol, probe_src_addr, probe_dst_prefix) SETTINGS index_granularity = 8192
+CREATE TABLE ${DEV_CH_DB}.$table (     \`probe_protocol\` UInt8,     \`probe_src_addr\` IPv6,     \`probe_dst_prefix\` IPv6,     \`has_amplification\` UInt8,     \`has_loops\` UInt8 ) ENGINE = MergeTree ORDER BY (probe_protocol, probe_src_addr, probe_dst_prefix) SETTINGS index_granularity = 8192
 EOF
 }
 
@@ -147,7 +186,7 @@ probes_sql() {
 	local table="$1"
 
 	cat <<EOF
-CREATE TABLE IF NOT EXISTS ${DEV_CH_DB}.$table (     \`probe_protocol\` UInt8,     \`probe_dst_prefix\` IPv6,     \`probe_ttl\` UInt8,     \`cumulative_probes\` UInt32,     \`round\` UInt8 ) ENGINE = MergeTree ORDER BY (probe_protocol, probe_dst_prefix, probe_ttl) SETTINGS index_granularity = 8192
+CREATE TABLE ${DEV_CH_DB}.$table (     \`probe_protocol\` UInt8,     \`probe_dst_prefix\` IPv6,     \`probe_ttl\` UInt8,     \`cumulative_probes\` UInt32,     \`round\` UInt8 ) ENGINE = MergeTree ORDER BY (probe_protocol, probe_dst_prefix, probe_ttl) SETTINGS index_granularity = 8192
 EOF
 }
 
@@ -155,7 +194,7 @@ results_sql() {
 	local table="$1"
 
 	cat <<EOF
-CREATE TABLE IF NOT EXISTS ${DEV_CH_DB}.$table (
+CREATE TABLE ${DEV_CH_DB}.$table (
     \\\`capture_timestamp\\\` DateTime,
     \\\`probe_protocol\\\` UInt8,
     \\\`probe_src_addr\\\` IPv6,
