@@ -57,6 +57,7 @@ download_prod_table() {
 	local num_rows="$3"
 	local num_chunks="$4"
     local chunk_of
+    local i
 
 	echo_log "P$process_id  starting to download $table"
     i=0
@@ -91,7 +92,6 @@ download_prod_table_chunk() {
 	mkdir -p "${LOCAL_DIR}"
 	local_file="${LOCAL_DIR}/${table}.${offset}.parquet"
 	if [[ -f "${local_file}" ]]; then
-		# echo_log "P$process_id ${local_file} already exists"
         echo_log "P$process_id already downloaded chunk $chunk_of of $table"
 		return 0
 	fi
@@ -120,6 +120,7 @@ upload_dev_table() {
 	local chunk_of
 	local create_sql
 	local load_sql
+    local i
 
 	case "${table}" in
 	cleaned_links__*) create_sql=$(links_sql "${table}");;
@@ -132,7 +133,7 @@ upload_dev_table() {
 	if [[ -z "${DEV_SSH_USER+x}" ]]; then
         if ! clickhouse client --user "${DEV_CH_USER}" --password "${DEV_CH_PASSWD}" -q "${create_sql//\\/}" 2>/dev/null; then
             echo_log "P$process_id table already exists for $table skipping"
-            return 1
+            return
         fi
 
 		load_sql="INSERT INTO ${DEV_CH_DB}.${table} FORMAT Parquet"
@@ -145,7 +146,7 @@ upload_dev_table() {
 	else
 		if ! ssh "${DEV_SSH_USER}@${IRIS_DEV_HOSTNAME}" clickhouse-client --user "${DEV_CH_USER}" --password "${DEV_CH_PASSWD}" -q \""${create_sql}"\" 2>/dev/null; then
             echo_log "P$process_id table already exists for $table skipping"
-            return 1
+            return
         fi
 		load_sql="INSERT INTO ${DEV_CH_DB}.${table} FORMAT Parquet"
 		for t in "${LOCAL_DIR}/${table}"*; do
