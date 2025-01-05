@@ -20,12 +20,13 @@ main () {
 	i=0
 	while read -r table; do
         # echo_log "$i" "$table"
-        echo_log "Starting next hop analysis of $table"
+        # echo_log "Starting next hop analysis of $table"
 
         cnh_table=$(./consumerctl cnh "$table" -w 10 -p "$DEV_CH_PASSWD" -u "$DEV_CH_USER")
         total_cnh=$((total_cnh + cnh_table))
 
-        echo_log "Finished next hop analysis of ${table} (current: ${cnh_table}, total: ${total_cnh})"
+        echo_log "Analysis complete for ${table} (current: ${cnh_table}, total: ${total_cnh})"
+        # echo_log "Finished next hop analysis of ${table} (current: ${cnh_table}, total: ${total_cnh})"
 
 		i=$((i + 1))
 	done < "$input"
