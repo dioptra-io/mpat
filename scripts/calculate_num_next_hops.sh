@@ -8,8 +8,8 @@ source .env
 main () {
     local input
 	local i
-    local cnh_table
-    local total_cnh=0
+    local current_num_next_hops
+    local total_num_next_hops=0
 
 	if [[ $# -ne 1 ]]; then
 		echo "$0: missing argument"
@@ -19,25 +19,14 @@ main () {
 
 	i=0
 	while read -r table; do
-        # echo_log "$i" "$table"
-        # echo_log "Starting next hop analysis of $table"
+        current_num_next_hops=$(./consumerctl cnh "$table" -w 10 -p "$DEV_CH_PASSWD" -u "$DEV_CH_USER")
+        
+        total_num_next_hops=$((total_num_next_hops + current_num_next_hops))
 
-        cnh_table=$(./consumerctl cnh "$table" -w 10 -p "$DEV_CH_PASSWD" -u "$DEV_CH_USER")
-        total_cnh=$((total_cnh + cnh_table))
-
-        echo_log "Analysis complete for ${table} (current: ${cnh_table}, total: ${total_cnh})"
-        # echo_log "Finished next hop analysis of ${table} (current: ${cnh_table}, total: ${total_cnh})"
+        echo "${table}" "${current_num_next_hops}" "${total_num_next_hops}"
 
 		i=$((i + 1))
 	done < "$input"
-
-
-    echo_log "Total of ${total_cnh} next hop information is calculated from the given tables"
-}
-
-# Logs the progress with the date and time specified.
-echo_log() {
-	echo "$(date -u)" ":" "$@"
 }
 
 main "$@"
