@@ -39,15 +39,11 @@ main () {
         else 
             num_rows=$(curl -s -X POST --user "${user}:${passwd}" "${url}" -d "${count_sql}" | tr -d '"')
         fi 
-        echo_log "${table} has ${num_rows} row(s)"
+        # echo_log "${table} has ${num_rows} row(s)"
+        echo "${prod}" "${table}" "${num_rows}"
 
 		i=$((i + 1))
 	done < "$input"
-}
-
-# Logs the progress with the date and time specified.
-echo_log() {
-	echo "$(date -u)" ":" "$@"
 }
 
 main "$@"
