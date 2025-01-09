@@ -36,6 +36,9 @@ var CountNextHopsCmd = &cobra.Command{
 			return
 		}
 
+		// Don't forge to close the connection
+		defer conn.Close()
+
 		if err := runWorker(tableName, fNumWorkers, conn); err != nil {
 			fmt.Printf("An error occured while running the workers%s\n", err)
 			return
@@ -63,19 +66,39 @@ SELECT count(DISTINCT
 FROM %s
 `
 
+	// 	selectQuery := `
+	// WITH
+	//     toIPv6(cutIPv6(probe_dst_addr, 0, 1)) AS probe_dst_pf,
+	//     groupArray((probe_ttl, reply_src_addr)) AS reply_and_ttl_array,
+	//     arraySort((x) -> x.1, reply_and_ttl_array) AS sorted_elems,
+	//     arrayMap(x -> x.1, sorted_elems) AS probe_ttl_array,
+	//     arrayMap(x -> x.2, sorted_elems) AS reply_src_array
+	// SELECT
+	//     -- probe_src_addr,
+	//     -- probe_dst_addr,
+	//     -- probe_src_port,
+	//     -- probe_ttl_array,
+	//     -- reply_src_array
+	//     probe_ttl_array
+	// FROM %s
+	// GROUP BY
+	//     probe_src_addr,
+	//     probe_dst_pf,
+	//     probe_dst_addr,
+	//     probe_src_port
+	// ORDER BY
+	//     probe_src_addr ASC,
+	//     probe_dst_pf ASC,
+	//     probe_dst_addr ASC,
+	//     probe_src_port ASC;
+	// `
+
 	selectQuery := `
 WITH 
     toIPv6(cutIPv6(probe_dst_addr, 0, 1)) AS probe_dst_pf,
-    groupArray((probe_ttl, reply_src_addr)) AS reply_and_ttl_array,
-    arraySort((x) -> x.1, reply_and_ttl_array) AS sorted_elems,
-    arrayMap(x -> x.1, sorted_elems) AS probe_ttl_array,
-    arrayMap(x -> x.2, sorted_elems) AS reply_src_array
+    groupUniqArray(probe_ttl) AS unsorted_elems,
+    arraySort((x) -> x, unsorted_elems) AS probe_ttl_array
 SELECT
-    -- probe_src_addr,
-    -- probe_dst_addr,
-    -- probe_src_port,
-    -- probe_ttl_array,
-    -- reply_src_array
     probe_ttl_array
 FROM %s
 GROUP BY
@@ -87,9 +110,8 @@ ORDER BY
     probe_src_addr ASC,
     probe_dst_pf ASC,
     probe_dst_addr ASC,
-    probe_src_port ASC;
-`
-
+    probe_src_port ASC
+    `
 	return fmt.Sprintf(countQuery, tableName), fmt.Sprintf(selectQuery, tableName)
 }
 
@@ -111,7 +133,6 @@ func runWorker(tableName string, numWorkers int, conn clickhouse.Conn) error {
 	if err != nil {
 		return err
 	}
-
 	// First do without the parallel stuff
 	for rows.Next() {
 		if err := rows.Scan(&ttls); err != nil {
