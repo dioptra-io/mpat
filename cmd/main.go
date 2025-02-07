@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"dioptra-io/ufuk-research/internal/nexthop"
+	"dioptra-io/ufuk-research/internal/routes"
 )
 
 var (
@@ -18,9 +18,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "consumercli [module name]",
-	Short: "Runs the consumer module",
-	Long:  "This is a program that consumes the data in the clikhouse database and computes a result.",
+	Use:   "analysisctl [module name]",
+	Short: "Run the analysisctl",
+	Long:  "",
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println("Please provide the a module to run.")
 		os.Exit(0)
@@ -28,7 +28,7 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(nexthop.CountNextHopsCmd)
+	rootCmd.AddCommand(routes.ComputeCmd)
 
 	// Set the persistent flags
 	rootCmd.PersistentFlags().
