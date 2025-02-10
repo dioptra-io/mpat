@@ -51,7 +51,7 @@ var RoutesComputeCmd = &cobra.Command{
 							err,
 						)
 						break
-					} else {
+					} else if err != nil {
 						fmt.Printf(
 							"error while computing the routes table %s, flag --stop-on-error is set to false so ignoring the error\n",
 							err,

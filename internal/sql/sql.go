@@ -12,7 +12,7 @@ func CheckTableExists(
 	ctx context.Context,
 	database, tableName string,
 ) (bool, error) {
-	var exists int
+	var exists uint8
 	existsQuery := fmt.Sprintf("EXISTS %s.%s;", database, tableName)
 
 	// Run the query
@@ -33,11 +33,11 @@ func CreateRoutesTable(
 	database, routesTableName string,
 ) error {
 	raw := `CREATE TABLE %s.%s (
-ip_addr IPv6,
-dst_prefix IPv6,
-next_addr IPv6,
-UNIQUE(ip_addr, dst_prefix, next_addr)
-) ENGINE = ReplacingMergeTree()
+    ip_addr IPv6,
+    dst_prefix IPv6,
+    next_addr IPv6,
+    PRIMARY KEY (ip_addr, dst_prefix, next_addr)
+) ENGINE = MergeTree()
 ORDER BY (ip_addr, dst_prefix, next_addr)`
 
 	createQuery := fmt.Sprintf(raw, database, routesTableName)
@@ -55,67 +55,71 @@ func InsertIntoRoutesFromResults(
 	ctx context.Context,
 	database, routesTableName, resultsTableName string,
 ) error {
-	rawInsertQuery := `WITH
-	    toIPv6('::') AS null_ip,
-	    results_table as (
-	        SELECT
-	            probe_dst_addr,
-	            probe_src_addr,
-	            probe_dst_port,
-	            probe_src_port,
-	            probe_protocol,
-	            probe_ttl,
-	            reply_src_addr
-	        FROM
-	            %s.%s
-	    )
-	SELECT
-	    DISTINCT ip_addr, dst_prefix, next_addr
-	FROM (
-	    WITH
-	    -- Creates the range for the TTL
-	        groupUniqArray((probe_ttl, reply_src_addr)) as route_traces,
-	    -- Create the ttl_array and values_array
-	        arrayMap(x -> x.1, route_traces) as ttl_array,
-	        arrayMap(x -> x.2, route_traces) as address_array,
-	    -- Creates the range for the TTL
-	        range(toUInt8(arrayMin(ttl_array)), toUInt8(arrayMax(ttl_array) - 1)) as ttl_range,
-	    -- Convert the route traces to a map
-	        CAST((ttl_array, address_array), 'Map(UInt8, IPv6)') as route_traces_map,
-	    -- Create the links like in the links table calculation
-	        arrayMap(i -> (route_traces_map[toUInt8(i)], route_traces_map[toUInt8(i + 1)]), ttl_range) AS links,
-	    -- Filter out the null addresses
-	        arrayFilter(x -> x.1 <> null_ip and x.2 <> null_ip, links) as filtered_links,
-	    -- Join the links
-	        arrayJoin(filtered_links) AS link
-	    SELECT
-	        probe_dst_addr,
-	        probe_src_addr,
-	        toIPv6(cutIPv6(probe_dst_addr, 0, 1)) as dst_prefix,
-	        link.1 as ip_addr,
-	        link.2 as next_addr
-	    FROM
-	        results_table
-	    GROUP BY
-	        probe_dst_addr,
-	        probe_src_addr,
-	        probe_dst_port,
-	        probe_src_port,
-	        probe_protocol
-	    ORDER BY
-	        probe_dst_addr,
-	        probe_src_addr,
-	        probe_dst_port,
-	        probe_src_port,
-	        probe_protocol
-	)
-	ORDER BY
-	    ip_addr,
-	    dst_prefix,
-	    next_addr`
+	rawInsertQuery := `
+    INSERT INTO %s.%s
+        WITH
+            toIPv6('::') AS null_ip,
+            results_table as (
+                SELECT
+                    probe_dst_addr,
+                    probe_src_addr,
+                    probe_dst_port,
+                    probe_src_port,
+                    probe_protocol,
+                    probe_ttl,
+                    reply_src_addr
+                FROM
+                    %s.%s
+                %s
+            )
+        SELECT
+            DISTINCT ip_addr, dst_prefix, next_addr
+        FROM (
+            WITH
+                groupUniqArray((probe_ttl, reply_src_addr)) as route_traces,
+                arrayMap(x -> x.1, route_traces) as ttl_array,
+                arrayMap(x -> x.2, route_traces) as address_array,
+                range(toUInt8(arrayMin(ttl_array)), toUInt8(arrayMax(ttl_array) - 1)) as ttl_range,
+                CAST((ttl_array, address_array), 'Map(UInt8, IPv6)') as route_traces_map,
+                arrayMap(i -> (route_traces_map[toUInt8(i)], route_traces_map[toUInt8(i + 1)]), ttl_range) AS links,
+                arrayFilter(x -> x.1 <> null_ip and x.2 <> null_ip, links) as filtered_links,
+                arrayJoin(filtered_links) AS link
+            SELECT
+                probe_dst_addr,
+                probe_src_addr,
+                toIPv6(cutIPv6(probe_dst_addr, 0, 1)) as dst_prefix,
+                link.1 as ip_addr,
+                link.2 as next_addr
+            FROM
+                results_table
+            GROUP BY
+                probe_dst_addr,
+                probe_src_addr,
+                probe_dst_port,
+                probe_src_port,
+                probe_protocol
+            ORDER BY
+                probe_dst_addr,
+                probe_src_addr,
+                probe_dst_port,
+                probe_src_port,
+                probe_protocol
+        )
+        ORDER BY
+            ip_addr,
+            dst_prefix,
+            next_addr`
 
-	selectQuery := fmt.Sprintf(rawInsertQuery, database, resultsTableName)
-	insertQuery := fmt.Sprintf("INSERT INTO %s.%s (%s)", database, routesTableName, selectQuery)
+	limitString := "LIMIT 10000"
+
+	insertQuery := fmt.Sprintf(
+		rawInsertQuery,
+		database,
+		routesTableName,
+		database,
+		resultsTableName,
+		limitString,
+	)
 
 	err := conn.Exec(ctx, insertQuery)
 	if err != nil {
