@@ -47,13 +47,13 @@ var RoutesComputeCmd = &cobra.Command{
 					if err := run(conn, database, resultsTableName, fNoSQL); err != nil &&
 						fStopOnError {
 						fmt.Printf(
-							"error while computing the results table %s, flag --stop-on-error is set to true so exitting\n",
+							"error while computing the routes table %s, flag --stop-on-error is set to true so exitting\n",
 							err,
 						)
 						break
 					} else {
 						fmt.Printf(
-							"error while computing the results table %s, flag --stop-on-error is set to false so ignoring the error\n",
+							"error while computing the routes table %s, flag --stop-on-error is set to false so ignoring the error\n",
 							err,
 						)
 					}
