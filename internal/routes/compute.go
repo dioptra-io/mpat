@@ -27,11 +27,6 @@ var RoutesComputeCmd = &cobra.Command{
 	Short: "Create the routes table in the Clickhouse server for each given results table name.",
 	Long:  "In the documentation the routes tables are defined as triplets of IPv6 addresses. They correspond to the ip_addr, next_addr, dst_prefix. This program executes an SQL query which creates the table and inserts the calculated values. The values are calculated from results table. If the --stdin flag is set then read the table names from the standard input.",
 	Run: func(cmd *cobra.Command, args []string) {
-		// Check the number of arguemnts
-		if len(args) == 0 {
-			return
-		}
-
 		conn, err := internal.NewConnection()
 		if err != nil {
 			fmt.Printf("cannot establish connection with Clickhouse %s\n", err)
@@ -41,7 +36,6 @@ var RoutesComputeCmd = &cobra.Command{
 		// Get the name of the database from the config
 		database := viper.GetString("database")
 
-		// Create the channels and waiting groups
 		resultsTableNamesChannel := make(chan string)
 		var wg sync.WaitGroup
 		wg.Add(1)
@@ -51,12 +45,17 @@ var RoutesComputeCmd = &cobra.Command{
 			for {
 				if resultsTableName, ok := <-resultsTableNamesChannel; ok {
 					if err := run(conn, database, resultsTableName, fNoSQL); err != nil &&
-						!fStopOnError {
+						fStopOnError {
 						fmt.Printf(
 							"error while computing the results table %s, flag --stop-on-error is set to true so exitting\n",
 							err,
 						)
 						break
+					} else {
+						fmt.Printf(
+							"error while computing the results table %s, flag --stop-on-error is set to false so ignoring the error\n",
+							err,
+						)
 					}
 				} else {
 					fmt.Println("Computation finished!")
