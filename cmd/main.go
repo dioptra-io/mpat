@@ -22,13 +22,14 @@ var rootCmd = &cobra.Command{
 	Short: "Run the analysisctl",
 	Long:  "",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Please provide the a module to run.")
+		fmt.Println("Available modules are:")
+		fmt.Println("   routes")
 		os.Exit(0)
 	},
 }
 
 func init() {
-	rootCmd.AddCommand(routes.ComputeCmd)
+	rootCmd.AddCommand(routes.RoutesCmd)
 
 	// Set the persistent flags
 	rootCmd.PersistentFlags().

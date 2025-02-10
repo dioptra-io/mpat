@@ -1,67 +1,121 @@
 package routes
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"os"
+	"strings"
+	"sync"
 
+	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
 	"dioptra-io/ufuk-research/internal"
+	"dioptra-io/ufuk-research/internal/sql"
 )
 
 var (
-	fNumWorkers  int
-	fProgressBar bool
+	fStdin       bool
+	fStopOnError bool
+	fNoSQL       bool
 )
 
-var ComputeCmd = &cobra.Command{
+var RoutesComputeCmd = &cobra.Command{
 	Use:   "compute",
-	Short: "Create the routes table",
-	Long:  "The program computes the routes table consisting of triplets (ip_addr, dst_prefix, next_addr) for the given results table name.",
+	Short: "Create the routes table in the Clickhouse server for each given results table name.",
+	Long:  "In the documentation the routes tables are defined as triplets of IPv6 addresses. They correspond to the ip_addr, next_addr, dst_prefix. This program executes an SQL query which creates the table and inserts the calculated values. The values are calculated from results table. If the --stdin flag is set then read the table names from the standard input.",
 	Run: func(cmd *cobra.Command, args []string) {
-		if len(args) != 1 {
-			fmt.Println("Missing argument <results-table-name>")
+		// Check the number of arguemnts
+		if len(args) == 0 {
 			return
 		}
-
-		resultsTableName := args[0]
 
 		conn, err := internal.NewConnection()
 		if err != nil {
-			fmt.Printf("Cannot connect to the clickhouse database %s\n", err)
+			fmt.Printf("cannot establish connection with Clickhouse %s\n", err)
 			return
 		}
 
-		// Don't forge to close the connection
-		defer conn.Close()
+		// Get the name of the database from the config
+		database := viper.GetString("database")
 
-		// Check if the table exists
-		if exists, err := internal.TableExists(conn, context.TODO(), resultsTableName); err != nil ||
-			!exists {
-			fmt.Printf("Table exists or cannot connect %s\n", err)
-			return
+		// Create the channels and waiting groups
+		resultsTableNamesChannel := make(chan string)
+		var wg sync.WaitGroup
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			for {
+				if resultsTableName, ok := <-resultsTableNamesChannel; ok {
+					if err := run(conn, database, resultsTableName, fNoSQL); err != nil &&
+						!fStopOnError {
+						fmt.Printf(
+							"error while computing the results table %s, flag --stop-on-error is set to true so exitting\n",
+							err,
+						)
+						break
+					}
+				} else {
+					fmt.Println("Computation finished!")
+					break
+				}
+			}
+		}()
+
+		if fStdin {
+			scanner := bufio.NewScanner(os.Stdin)
+			for scanner.Scan() {
+				resultsTableNamesChannel <- scanner.Text()
+			}
+			close(resultsTableNamesChannel)
+		} else {
+			for _, resultsTableName := range args {
+				resultsTableNamesChannel <- resultsTableName
+			}
+			close(resultsTableNamesChannel)
+		}
+
+		wg.Wait()
+	},
+}
+
+func init() {
+	RoutesComputeCmd.PersistentFlags().
+		BoolVar(&fStdin, "stdin", false, "set this flag to receive the input from stdin.")
+	RoutesComputeCmd.PersistentFlags().
+		BoolVar(&fStopOnError, "stop-on-error", false, "set this flag to true if the program should exit if there is an error.")
+	RoutesComputeCmd.PersistentFlags().
+		BoolVar(&fNoSQL, "no-sql", false, "set this flag to true if the program should streamed data to calculate routes table.")
+}
+
+func run(conn clickhouse.Conn, database string, resultsTableName string, noSQL bool) error {
+	// No SQL computation of the routes table is not yet supported.
+	if noSQL {
+		return fmt.Errorf("no-sql is not supported for now")
+	} else {
+		ctx := context.TODO()
+		routesTableName := fmt.Sprintf("routes%s", strings.TrimPrefix(resultsTableName, "results"))
+
+		// Check for table
+		if exists, err := sql.CheckTableExists(conn, ctx, database, routesTableName); err != nil {
+			return err
+		} else if exists {
+			return fmt.Errorf("table %s already exists, remove the table to recompute routes table", routesTableName)
 		}
 
 		// Create the table
-		routesTableName := internal.ResultsToRoutesTableName(resultsTableName)
-
-		if err := internal.CreateTable(conn, context.TODO(), routesTableName); err != nil {
-			fmt.Printf("Cannot create routes table %s: %s\n", routesTableName, err)
-			return
+		if err := sql.CreateRoutesTable(conn, ctx, database, routesTableName); err != nil {
+			return err
 		}
 
-		// Insert values into the routes table
-		database := viper.GetString("database")
-		insertStatement := internal.SQLInsertIntoRoutes(database, resultsTableName)
-
-		if err := conn.Exec(context.TODO(), insertStatement); err != nil {
-			fmt.Printf(
-				"Cannot insert to routes table from results table %s: %s\n",
-				routesTableName,
-				err,
-			)
-			return
+		// Finally select and insert the values
+		if err := sql.InsertIntoRoutesFromResults(conn, ctx, database, routesTableName, resultsTableName); err != nil {
+			return err
 		}
-	},
+
+		return nil
+	}
 }
