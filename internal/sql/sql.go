@@ -100,7 +100,7 @@ func InsertIntoRoutesFromResults(
                 range(toUInt8(arrayMin(ttl_array)), toUInt8(arrayMax(ttl_array) - 1)) as ttl_range,
                 CAST((ttl_array, address_array), 'Map(UInt8, IPv6)') as route_traces_map,
                 arrayMap(i -> (route_traces_map[toUInt8(i)], route_traces_map[toUInt8(i + 1)]), ttl_range) AS links,
-                arrayFilter(x -> x.1 <> null_ip and x.2 <> null_ip, links) as filtered_links,
+                arrayFilter(x -> x.1 <> null_ip and x.2 <> null_ip and x.1 <> dst_prefix and x.2 <> dst_prefix, links) as filtered_links,
                 arrayJoin(filtered_links) AS link
             SELECT
                 probe_dst_addr,
