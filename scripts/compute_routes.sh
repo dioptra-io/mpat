@@ -68,7 +68,7 @@ ORDER BY
     ip_addr,
     dst_prefix,
     next_addr
-FORMAT Parquet
+FORMAT CSV
 EOF
 }
 
@@ -92,7 +92,7 @@ main () {
 	i=0
 	while read -r table; do
         query=$(select_routes_query "${database}" "${table}")
-        routes_path="${routes_directory}/routes_${table}.parquet"
+        routes_path="${routes_directory}/routes_${table}.csv"
 
         curl -s \
             -X POST \
