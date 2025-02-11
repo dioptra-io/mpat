@@ -177,7 +177,7 @@ ORDER BY
 
 	for rows.Next() {
 		if err := rows.Scan(&address, &routeScore); err == nil {
-			fmt.Printf("%q %v\n", address, routeScore)
+			fmt.Printf("%q, %v\n", address, routeScore)
 		} else {
 			return err
 		}
@@ -215,7 +215,7 @@ ORDER BY
 
 	for rows.Next() {
 		if err := rows.Scan(&address, &routeScore); err == nil {
-			fmt.Printf("%q %v\n", address, routeScore)
+			fmt.Printf("%q, %v\n", address, routeScore)
 		} else {
 			return err
 		}
