@@ -204,6 +204,8 @@ ORDER BY
     ip_addr DESC`
 	selectQuery := fmt.Sprintf(raw, database, measurementUUID)
 
+	fmt.Printf("selectQuery: %v\n", selectQuery)
+
 	// Run the query
 	rows, err := conn.Query(ctx, selectQuery)
 	if err != nil {

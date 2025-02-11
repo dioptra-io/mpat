@@ -13,6 +13,8 @@ import (
 	"dioptra-io/ufuk-research/internal/sql"
 )
 
+var fUseMerge bool
+
 var RoutesScoreCmd = &cobra.Command{
 	Use:   "score",
 	Short: "Compute the route score of the ip addresses from the routes table.",
@@ -27,27 +29,37 @@ var RoutesScoreCmd = &cobra.Command{
 		// Get the name of the database from the config
 		database := viper.GetString("database")
 
-		if err := runScores(conn, database, args[0], false); err != nil {
+		if err := runScores(conn, database, args[0], fUseMerge); err != nil {
 			fmt.Print(err)
 			return
 		}
 	},
 }
 
+func init() {
+	RoutesScoreCmd.PersistentFlags().
+		BoolVar(&fUseMerge, "use-merge", false, "set this flag to true if the program are given meas uuid instead of the table name.")
+}
+
 func runScores(
 	conn clickhouse.Conn,
 	database string,
-	inputTableorUUID string,
-	inputUUID bool,
+	tableOrMeasUUID string,
+	useMerge bool,
 ) error {
 	ctx := context.TODO()
-	routesTableName := fmt.Sprintf("routes%s", strings.TrimPrefix(inputTableorUUID, "results"))
+	// Sanitize the given input by replacing all the '-' with '_'.
+	sanitizedTableOrMeasUUID := strings.ReplaceAll(tableOrMeasUUID, "-", "_")
 	// No SQL computation of the routes table is not yet supported.
-	if inputUUID {
-		if err := sql.GetRouteScoresOfAddressesMerged(conn, ctx, database, routesTableName); err != nil {
+	if useMerge {
+		if err := sql.GetRouteScoresOfAddressesMerged(conn, ctx, database, sanitizedTableOrMeasUUID); err != nil {
 			return err
 		}
 	} else {
+		routesTableName := fmt.Sprintf(
+			"routes__%s",
+			strings.TrimPrefix(sanitizedTableOrMeasUUID, "results__"),
+		)
 		if err := sql.GetRouteScoresOfAddresses(conn, ctx, database, routesTableName); err != nil {
 			return err
 		}
