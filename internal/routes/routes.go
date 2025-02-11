@@ -4,6 +4,9 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"dioptra-io/ufuk-research/internal/routes/compute"
+	"dioptra-io/ufuk-research/internal/routes/score"
 )
 
 var RoutesCmd = &cobra.Command{
@@ -17,5 +20,6 @@ var RoutesCmd = &cobra.Command{
 }
 
 func init() {
-	RoutesCmd.AddCommand(RoutesComputeCmd)
+	RoutesCmd.AddCommand(compute.RoutesComputeCmd)
+	RoutesCmd.AddCommand(score.RoutesScoreCmd)
 }

@@ -1,4 +1,4 @@
-package routes
+package compute
 
 import (
 	"bufio"
@@ -20,6 +20,7 @@ var (
 	fStdin       bool
 	fStopOnError bool
 	fNoSQL       bool
+	fTruncate    bool
 )
 
 var RoutesComputeCmd = &cobra.Command{
@@ -44,7 +45,7 @@ var RoutesComputeCmd = &cobra.Command{
 			defer wg.Done()
 			for {
 				if resultsTableName, ok := <-resultsTableNamesChannel; ok {
-					if err := run(conn, database, resultsTableName, fNoSQL); err != nil &&
+					if err := runCompute(conn, database, resultsTableName, fNoSQL); err != nil &&
 						fStopOnError {
 						fmt.Printf(
 							"error while computing the routes table %s, flag --stop-on-error is set to true so exitting\n",
@@ -88,9 +89,11 @@ func init() {
 		BoolVar(&fStopOnError, "stop-on-error", false, "set this flag to true if the program should exit if there is an error.")
 	RoutesComputeCmd.PersistentFlags().
 		BoolVar(&fNoSQL, "no-sql", false, "set this flag to true if the program should streamed data to calculate routes table.")
+	RoutesComputeCmd.PersistentFlags().
+		BoolVar(&fTruncate, "truncate", false, "set this flag to true if the program should truncate the table before the calculation.")
 }
 
-func run(conn clickhouse.Conn, database string, resultsTableName string, noSQL bool) error {
+func runCompute(conn clickhouse.Conn, database string, resultsTableName string, noSQL bool) error {
 	// No SQL computation of the routes table is not yet supported.
 	if noSQL {
 		return fmt.Errorf("no-sql is not supported for now")
@@ -101,13 +104,20 @@ func run(conn clickhouse.Conn, database string, resultsTableName string, noSQL b
 		// Check for table
 		if exists, err := sql.CheckTableExists(conn, ctx, database, routesTableName); err != nil {
 			return err
-		} else if exists {
+		} else if exists && !fTruncate {
 			return fmt.Errorf("table %s already exists, remove the table to recompute routes table", routesTableName)
 		}
 
 		// Create the table
-		if err := sql.CreateRoutesTable(conn, ctx, database, routesTableName); err != nil {
+		if err := sql.CreateRoutesTable(conn, ctx, database, routesTableName); err != nil && !fTruncate {
 			return err
+		}
+
+		// Truncate the table if the flag is set
+		if fTruncate {
+			if err := sql.TruncateRoutesTable(conn, ctx, database, routesTableName); err != nil {
+				return err
+			}
 		}
 
 		// Finally select and insert the values

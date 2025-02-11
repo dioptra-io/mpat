@@ -3,6 +3,7 @@ package sql
 import (
 	"context"
 	"fmt"
+	"net"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 )
@@ -39,6 +40,23 @@ func CreateRoutesTable(
     PRIMARY KEY (ip_addr, dst_prefix, next_addr)
 ) ENGINE = MergeTree()
 ORDER BY (ip_addr, dst_prefix, next_addr)`
+
+	createQuery := fmt.Sprintf(raw, database, routesTableName)
+
+	// Run the query
+	err := conn.Exec(ctx, createQuery)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func TruncateRoutesTable(
+	conn clickhouse.Conn,
+	ctx context.Context,
+	database, routesTableName string,
+) error {
+	raw := `TRUNCATE TABLE %s.%s`
 
 	createQuery := fmt.Sprintf(raw, database, routesTableName)
 
@@ -110,7 +128,7 @@ func InsertIntoRoutesFromResults(
             dst_prefix,
             next_addr`
 
-	limitString := "LIMIT 10000"
+	limitString := "LIMIT 0"
 
 	insertQuery := fmt.Sprintf(
 		rawInsertQuery,
@@ -124,6 +142,83 @@ func InsertIntoRoutesFromResults(
 	err := conn.Exec(ctx, insertQuery)
 	if err != nil {
 		return err
+	}
+	return nil
+}
+
+func GetRouteScoresOfAddresses(
+	conn clickhouse.Conn,
+	ctx context.Context,
+	database, routesTableName string,
+) error {
+	raw := `WITH
+    length(groupUniqArray(dst_prefix)) as route_score
+SELECT
+    ip_addr,
+    route_score
+FROM
+    -- merge('iris', 'routes__b56098aa_896c_437c_9a98_a2c6b51a5a84__*')
+    %s.%s
+GROUP BY
+    ip_addr
+ORDER BY
+    route_score DESC,
+    ip_addr DESC`
+	selectQuery := fmt.Sprintf(raw, database, routesTableName)
+
+	// Run the query
+	rows, err := conn.Query(ctx, selectQuery)
+	if err != nil {
+		return err
+	}
+
+	var address net.IP
+	var routeScore uint64
+
+	for rows.Next() {
+		if err := rows.Scan(&address, &routeScore); err == nil {
+			fmt.Printf("%q %v\n", address, routeScore)
+		} else {
+			return err
+		}
+	}
+	return nil
+}
+
+func GetRouteScoresOfAddressesMerged(
+	conn clickhouse.Conn,
+	ctx context.Context,
+	database, measurementUUID string,
+) error {
+	raw := `WITH
+    length(groupUniqArray(dst_prefix)) as route_score
+SELECT
+    ip_addr,
+    route_score
+FROM
+    merge('%s', 'routes__%s__*')
+GROUP BY
+    ip_addr
+ORDER BY
+    route_score DESC,
+    ip_addr DESC`
+	selectQuery := fmt.Sprintf(raw, database, measurementUUID)
+
+	// Run the query
+	rows, err := conn.Query(ctx, selectQuery)
+	if err != nil {
+		return err
+	}
+
+	var address net.IP
+	var routeScore uint64
+
+	for rows.Next() {
+		if err := rows.Scan(&address, &routeScore); err == nil {
+			fmt.Printf("%q %v\n", address, routeScore)
+		} else {
+			return err
+		}
 	}
 	return nil
 }
