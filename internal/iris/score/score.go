@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/viper"
 
 	"dioptra-io/ufuk-research/internal/common"
+	"dioptra-io/ufuk-research/internal/log"
 )
 
 var (
@@ -20,21 +21,21 @@ var (
 	fAgentUUIDs     []string
 )
 
+var logger = log.GetLogger()
+
 var IrisScoreCmd = &cobra.Command{
 	Use:   "score measurement-uuid [agent-uuid]",
 	Short: "Compute the routes table and get the routes score.",
 	Long:  "...",
 	Args:  cobra.MinimumNArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if fNoSQL {
-			fmt.Println("--no-sql flag is set however it is not supported.")
-			return
+			return common.ErrorFlagNoSQLNotSupported
 		}
 
 		conn, err := common.NewConnection()
 		if err != nil {
-			fmt.Printf("cannot establish connection with Clickhouse %s\n", err)
-			return
+			return err
 		}
 
 		// Create the output writer
@@ -45,8 +46,7 @@ var IrisScoreCmd = &cobra.Command{
 		} else {
 			file, err := os.OpenFile(fOutput, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 			if err != nil {
-				fmt.Printf("cannot open output file %s\n", fOutput)
-				return
+				return err
 			}
 
 			defer file.Close()
@@ -66,9 +66,9 @@ var IrisScoreCmd = &cobra.Command{
 		}
 
 		if err := run(conn, cfg); err != nil {
-			fmt.Print(err)
-			return
+			return err
 		}
+		return nil
 	},
 }
 
