@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"dioptra-io/ufuk-research/internal/routes"
+	"dioptra-io/ufuk-research/internal/iris"
 )
 
 var (
@@ -18,23 +18,18 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "analysisctl [module name]",
+	Use:   "mpat [module name]",
 	Short: "Run the analysisctl",
 	Long:  "",
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Available modules are:")
-		fmt.Println("   routes")
-		os.Exit(0)
-	},
 }
 
 func init() {
-	rootCmd.AddCommand(routes.RoutesCmd)
+	rootCmd.AddCommand(iris.IrisCmd)
 
 	// Set the persistent flags
 	rootCmd.PersistentFlags().
 		StringVarP(&fDatabase, "database", "d", "iris", "set the name of the database")
-	rootCmd.PersistentFlags().StringVarP(&fUser, "user", "u", "admin", "set the name of the user")
+	rootCmd.PersistentFlags().StringVarP(&fUser, "user", "u", "default", "set the name of the user")
 	rootCmd.PersistentFlags().
 		StringVarP(&fPassword, "password", "p", "", "set the name of the password")
 	rootCmd.PersistentFlags().
