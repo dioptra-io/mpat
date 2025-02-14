@@ -1,2 +1,2 @@
 build:
-	go build -o bomctl cmd/main.go
+	go build -o mpat cmd/main.go
