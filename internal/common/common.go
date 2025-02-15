@@ -10,7 +10,11 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/spf13/viper"
+
+	"dioptra-io/ufuk-research/internal/log"
 )
+
+var logger = log.GetLogger()
 
 func NewConnection() (clickhouse.Conn, error) {
 	database := viper.GetString("database")
@@ -39,10 +43,15 @@ func GetExistingAndNonExistingTables(
 ) ([]string, []string, error) {
 	measUUIDFormatted := strings.ReplaceAll(measUUID, "-", "_")
 	// Query to fetch existing tables
-	query := fmt.Sprintf("SHOW TABLES FROM %s LIKE 'routes__%s__%%'", database, measUUIDFormatted)
+	showTablesQuery := fmt.Sprintf(
+		"SHOW TABLES FROM %s LIKE 'routes__%s__%%'",
+		database,
+		measUUIDFormatted,
+	)
 
+	logger.Debugf("Show tables query: %v\n", showTablesQuery)
 	// Execute query to get all tables from the database
-	rows, err := conn.Query(context.TODO(), query)
+	rows, err := conn.Query(context.TODO(), showTablesQuery)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error executing SHOW TABLES query: %w", err)
 	}
@@ -58,24 +67,55 @@ func GetExistingAndNonExistingTables(
 		databaseTableNames = append(databaseTableNames, tableName)
 	}
 
-	// The UUIDs of the agents are not specified so get all of the tables we see.
-	if len(agentUUIDs) == 0 {
-		return databaseTableNames, []string{}, nil
-	}
+	logger.Debugf("Scanned %v database route tables.\n", len(databaseTableNames))
+	logger.Debugf("Database route tables %v.\n", databaseTableNames)
 
 	// Generate the tables by the provided agent uuids.
 	generatedTableNames := make([]string, 0)
-	for _, agentUUID := range agentUUIDs {
-		agentUUIDFormatted := strings.ReplaceAll(agentUUID, "-", "_")
-		generatedTableName := fmt.Sprintf("routes__%s__%s", measUUIDFormatted, agentUUIDFormatted)
-		generatedTableNames = append(generatedTableNames, generatedTableName)
+	// If the agent UUIDs are not given then use results tables to get the agent-uuids.
+	if len(agentUUIDs) != 0 {
+		for _, agentUUID := range agentUUIDs {
+			agentUUIDFormatted := strings.ReplaceAll(agentUUID, "-", "_")
+			generatedTableName := fmt.Sprintf(
+				"routes__%s__%s",
+				measUUIDFormatted,
+				agentUUIDFormatted,
+			)
+			generatedTableNames = append(generatedTableNames, generatedTableName)
+		}
+	} else {
+		showTablesQuery := fmt.Sprintf(
+			"SHOW TABLES FROM %s LIKE 'results__%s__%%'",
+			database,
+			measUUIDFormatted,
+		)
+
+		// Execute query to get all tables from the database
+		rows, err := conn.Query(context.TODO(), showTablesQuery)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error executing SHOW TABLES query: %w", err)
+		}
+		defer rows.Close()
+
+		// Iterate the results tables
+		for rows.Next() {
+			var resultsTableName string
+			if err := rows.Scan(&resultsTableName); err != nil {
+				return nil, nil, fmt.Errorf("error scanning table name: %w", err)
+			}
+			tableName := strings.Replace(resultsTableName, "results__", "routes__", 1)
+			generatedTableNames = append(generatedTableNames, tableName)
+		}
 	}
 
-	// generated set intersection database gives the existing tables.
-	existingTableNames := SetIntersection(generatedTableNames, databaseTableNames)
+	logger.Debugf("Generated %v route tables.\n", len(generatedTableNames))
+	logger.Debugf("Route tables %v.\n", generatedTableNames)
 
 	// generated set difference database gives non-exising tables.
 	nonExistingTableNames := SetDifference(generatedTableNames, databaseTableNames)
+
+	// generated set intersection database gives the existing tables.
+	existingTableNames := SetIntersection(generatedTableNames, databaseTableNames)
 
 	return existingTableNames, nonExistingTableNames, nil
 }
@@ -135,12 +175,16 @@ ORDER BY (ip_addr, dst_prefix, next_addr)`
 
 		createQuery := fmt.Sprintf(raw, database, tableName)
 
+		logger.Debugf("Create the routes table SQL query: %v\n", createQuery)
 		// Run the query
 		err := conn.Exec(context.TODO(), createQuery)
 		if err != nil {
 			return err
 		}
+		logger.Debugf("Created table '%s'.\n", tableName)
+
 	}
+
 	return nil
 }
 
@@ -153,10 +197,12 @@ func TruncateTables(
 
 		raw := `TRUNCATE TABLE %s.%s`
 
-		createQuery := fmt.Sprintf(raw, database, tableName)
+		truncateQuery := fmt.Sprintf(raw, database, tableName)
+
+		logger.Debugf("Truncate the routes SQL query: %v\n", truncateQuery)
 
 		// Run the query
-		err := conn.Exec(context.TODO(), createQuery)
+		err := conn.Exec(context.TODO(), truncateQuery)
 		if err != nil {
 			return err
 		}
@@ -169,6 +215,7 @@ func ComputeRouteTables(
 	database string,
 	tablesToTruncate []string,
 ) error {
+	logger.Infoln("Started computing the routes tables.")
 	for _, tableName := range tablesToTruncate {
 		resultsTableName := strings.Replace(tableName, "routes__", "results__", 1)
 
@@ -227,7 +274,8 @@ func ComputeRouteTables(
             dst_prefix,
             next_addr`
 
-		limitString := "LIMIT 10"
+		// limitString := "LIMIT 10"
+		limitString := ""
 
 		insertQuery := fmt.Sprintf(
 			rawInsertQuery,
@@ -238,11 +286,15 @@ func ComputeRouteTables(
 			limitString,
 		)
 
+		logger.Debugf("Insert to routes SQL query: %v\n", insertQuery)
+
 		err := conn.Exec(context.TODO(), insertQuery)
 		if err != nil {
 			return err
 		}
+		logger.Infof("Computation done for %v.\n", tableName)
 	}
+	logger.Infoln("Finished computing the routes tables.")
 	return nil
 }
 
@@ -289,6 +341,8 @@ ORDER BY
     ip_addr DESC`
 	selectQuery := fmt.Sprintf(raw, unionStatement, addressConditions)
 
+	logger.Debugf("Select SQL query: %v\n", selectQuery)
+	logger.Infoln("Started writing the scores to the output file.")
 	// Run the query
 	rows, err := conn.Query(context.TODO(), selectQuery)
 	if err != nil {
@@ -308,5 +362,6 @@ ORDER BY
 			return err
 		}
 	}
+	logger.Infoln("Finished writing the scores to the output file.")
 	return nil
 }

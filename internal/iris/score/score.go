@@ -1,7 +1,6 @@
 package score
 
 import (
-	"fmt"
 	"io"
 	"os"
 
@@ -24,35 +23,43 @@ var (
 var logger = log.GetLogger()
 
 var IrisScoreCmd = &cobra.Command{
-	Use:   "score measurement-uuid [agent-uuid]",
+	Use:   "score <measurement-uuid>",
 	Short: "Compute the routes table and get the routes score.",
 	Long:  "...",
 	Args:  cobra.MinimumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if fNoSQL {
-			return common.ErrorFlagNoSQLNotSupported
-		}
-
-		conn, err := common.NewConnection()
-		if err != nil {
-			return err
-		}
-
+	Run: func(cmd *cobra.Command, args []string) {
 		// Create the output writer
 		var writer io.Writer
 
 		if fOutput == "" {
+			log.SetSilent()
+			logger.Debugln("Output is set to stdout.")
 			writer = os.Stdout
 		} else {
 			file, err := os.OpenFile(fOutput, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 			if err != nil {
-				return err
+				logger.Panic(err)
+				return
 			}
 
 			defer file.Close()
 
 			writer = file
+
+			logger.Debugf("Output is set to the file %s.\n", fOutput)
 		}
+		if fNoSQL {
+			logger.Panic(common.ErrorFlagNoSQLNotSupported)
+			return
+		}
+
+		conn, err := common.NewConnection()
+		if err != nil {
+			logger.Panic(err)
+			return
+		}
+
+		logger.Debugln("Connection to Clickhouse is established.")
 
 		// Create the configuration for running the command.
 		cfg := &irisScoreConfig{
@@ -66,9 +73,11 @@ var IrisScoreCmd = &cobra.Command{
 		}
 
 		if err := run(conn, cfg); err != nil {
-			return err
+			logger.Panic(err)
+			return
 		}
-		return nil
+
+		logger.Debugln("Done running the command")
 	},
 }
 
@@ -113,6 +122,19 @@ func run(
 	); err != nil {
 		return err
 	}
+	logger.Debugf(
+		"Received %v existing tables, and %v non-existing tables.\n",
+		len(existingRouteTables),
+		len(nonExistingRouteTables),
+	)
+	logger.Debugf(
+		"Existing route tables: %v.\n",
+		existingRouteTables,
+	)
+	logger.Debugf(
+		"Nonexisting route tables: %v.\n",
+		nonExistingRouteTables,
+	)
 
 	tableNamesToProcess := nonExistingRouteTables
 
@@ -121,6 +143,10 @@ func run(
 		tableNamesToProcess = append(
 			tableNamesToProcess,
 			existingRouteTables...)
+		logger.Debugf(
+			"Force recompute flag is set, recomputing total of %v tables.\n",
+			len(tableNamesToProcess),
+		)
 	}
 
 	// Create the nonexisting tables
@@ -128,15 +154,22 @@ func run(
 		return err
 	}
 
+	logger.Infof("Created %v route table(s).\n", len(tableNamesToProcess))
+
 	// Truncate and populate the routes table
 	if err := common.TruncateTables(conn, cfg.Database, tableNamesToProcess); err != nil {
 		return err
 	}
 
+	logger.Infof("Truncated %v route table(s).\n", len(tableNamesToProcess))
+
 	// Compute the routes table
 	if err := common.ComputeRouteTables(conn, cfg.Database, tableNamesToProcess); err != nil {
 		return err
 	}
+
+	logger.Debugln("Computation for the routes tables are done!")
+	logger.Debugln("Ready to create compute the scores")
 
 	// Get the names of all route tables
 	allRouteTables := append(existingRouteTables, nonExistingRouteTables...)
@@ -145,6 +178,8 @@ func run(
 	if err := common.GetScoresFromRouteTables(conn, cfg.Database, allRouteTables, cfg.Addresses, cfg.OutputWriter); err != nil {
 		return err
 	}
+
+	logger.Debugln("Computation for the scores tables are done!")
 
 	return nil
 }

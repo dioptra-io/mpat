@@ -12,3 +12,7 @@ func Init() {
 func GetLogger() *logrus.Logger {
 	return log
 }
+
+func SetSilent() {
+	log.SetLevel(logrus.PanicLevel)
+}

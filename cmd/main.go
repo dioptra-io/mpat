@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/sirupsen/logrus"
@@ -31,7 +30,7 @@ var rootCmd = &cobra.Command{
 		// Set the default arguments for logging
 		logger.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
 		if fSilent {
-			logger.SetLevel(logrus.PanicLevel)
+			log.SetSilent()
 		} else {
 			if fDebug {
 				logger.SetLevel(logrus.DebugLevel)
