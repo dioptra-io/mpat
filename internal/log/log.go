@@ -32,6 +32,7 @@ func SetLogLevel(l LogLevel) {
 	case LevelSilent:
 		log.SetLevel(logrus.PanicLevel)
 	}
+	logLevel = l
 }
 
 func GetLogLevel() LogLevel {
