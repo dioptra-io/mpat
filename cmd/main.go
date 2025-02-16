@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 
+	"github.com/joho/godotenv"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -45,6 +46,8 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
+	godotenv.Load(".env")
+
 	rootCmd.AddCommand(iris.IrisCmd)
 	rootCmd.AddCommand(util.UtilCmd)
 
@@ -68,6 +71,12 @@ func init() {
 	viper.BindPFlag("host", rootCmd.PersistentFlags().Lookup("host"))
 	viper.BindPFlag("slent", rootCmd.PersistentFlags().Lookup("silent"))
 	viper.BindPFlag("debug", rootCmd.PersistentFlags().Lookup("debug"))
+
+	// Configure env variables
+	viper.SetConfigFile(".env")
+	if err := viper.ReadInConfig(); err != nil {
+		logger.Panicf("Error loading .env file: %s", err)
+	}
 }
 
 func main() {

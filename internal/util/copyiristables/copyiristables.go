@@ -6,6 +6,7 @@ import (
 
 	"github.com/chigopher/pathlib"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"dioptra-io/ufuk-research/internal/log"
 )
@@ -42,22 +43,26 @@ var UtilCopyIrisTablesCmd = &cobra.Command{
 				"Flag --progress is set for displaying the progressbar changing the log level normal to log level silent.",
 			)
 		}
+
 		prodConfig := DatabaseConfig{
-			User:      fProdUser,
-			Password:  fProdPassword,
-			Host:      fProdHost,
-			Database:  fProdDatabase,
+			User:      viper.GetString("prod-user"),
+			Password:  viper.GetString("prod-password"),
+			Host:      viper.GetString("prod-url"),
+			Database:  viper.GetString("prod-database"),
 			ChunkSize: fChunkSize,
 			TableType: fTableType,
 		}
 		devConfig := DatabaseConfig{
-			User:      fDevUser,
-			Password:  fDevPassword,
-			Host:      fDevHost,
-			Database:  fDevDatabase,
+			User:      viper.GetString("dev-user"),
+			Password:  viper.GetString("dev-password"),
+			Host:      viper.GetString("dev-url"),
+			Database:  viper.GetString("dev-database"),
 			ChunkSize: fChunkSize,
 			TableType: fTableType,
 		}
+
+		logger.Debugf("prodConfig: %v\n", prodConfig)
+		logger.Debugf("devConfig: %v\n", devConfig)
 
 		logger.Infof("Starting to download %v table(s).\n", len(args))
 		downloadDirPath := pathlib.NewPath(fDownloadPath)
@@ -180,4 +185,24 @@ func init() {
 		BoolVar(&fStopOnError, "stop-on-error", false, "if set the program halts in case of an error.")
 	UtilCopyIrisTablesCmd.Flags().
 		StringVar(&fDownloadPath, "download-path", "data/downloads", "this is the temp directory for downloading the chunks.")
+
+	viper.BindPFlag("prod-user", UtilCopyIrisTablesCmd.Flags().Lookup("prod-user"))
+	viper.BindPFlag("prod-password", UtilCopyIrisTablesCmd.Flags().Lookup("prod-password"))
+	viper.BindPFlag("prod-database", UtilCopyIrisTablesCmd.Flags().Lookup("prod-database"))
+	viper.BindPFlag("prod-url", UtilCopyIrisTablesCmd.Flags().Lookup("prod-url"))
+
+	viper.BindPFlag("dev-user", UtilCopyIrisTablesCmd.Flags().Lookup("dev-user"))
+	viper.BindPFlag("dev-password", UtilCopyIrisTablesCmd.Flags().Lookup("dev-password"))
+	viper.BindPFlag("dev-database", UtilCopyIrisTablesCmd.Flags().Lookup("dev-database"))
+	viper.BindPFlag("dev-url", UtilCopyIrisTablesCmd.Flags().Lookup("dev-url"))
+
+	viper.BindEnv("prod-user", "MPAT_PROD_USER")
+	viper.BindEnv("prod-password", "MPAT_PROD_PASSWORD")
+	viper.BindEnv("prod-database", "MPAT_PROD_DATABASE")
+	viper.BindEnv("prod-url", "MPAT_PROD_URL")
+
+	viper.BindEnv("dev-user", "MPAT_DEV_USER")
+	viper.BindEnv("dev-password", "MPAT_DEV_PASSWORD")
+	viper.BindEnv("dev-database", "MPAT_DEV_DATABASE")
+	viper.BindEnv("dev-url", "MPAT_DEV_URL")
 }
