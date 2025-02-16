@@ -9,6 +9,7 @@ import (
 
 	"dioptra-io/ufuk-research/internal/iris"
 	"dioptra-io/ufuk-research/internal/log"
+	"dioptra-io/ufuk-research/internal/util"
 )
 
 var (
@@ -30,12 +31,12 @@ var rootCmd = &cobra.Command{
 		// Set the default arguments for logging
 		logger.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
 		if fSilent {
-			log.SetSilent()
+			log.SetLogLevel(log.LevelSilent)
 		} else {
 			if fDebug {
-				logger.SetLevel(logrus.DebugLevel)
+				log.SetLogLevel(log.LevelDebug)
 			} else {
-				logger.SetLevel(logrus.InfoLevel)
+				log.SetLogLevel(log.LevelNormal)
 			}
 		}
 
@@ -45,6 +46,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(iris.IrisCmd)
+	rootCmd.AddCommand(util.UtilCmd)
 
 	// Set the persistent flags
 	rootCmd.PersistentFlags().
