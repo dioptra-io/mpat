@@ -32,7 +32,7 @@ var IrisScoreCmd = &cobra.Command{
 		var writer io.Writer
 
 		if fOutput == "" {
-			log.SetSilent()
+			log.SetLogLevel(log.LevelSilent)
 			logger.Debugln("Output is set to stdout.")
 			writer = os.Stdout
 		} else {
