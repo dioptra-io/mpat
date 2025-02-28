@@ -33,7 +33,7 @@ var (
 var logger = log.GetLogger()
 
 var CopyIrisDataCmd = &cobra.Command{
-	Use:   "copyiristables [measurement-uuids...]",
+	Use:   "irisdata [measurement-uuids...]",
 	Short: "This is a utility function that downloads and inserts iris tables and uploads them to the dev server.",
 	Long:  "...",
 	Run: func(cmd *cobra.Command, args []string) {
