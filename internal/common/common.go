@@ -169,6 +169,7 @@ func CreateRouteTablesIfNotExists(
     ip_addr IPv6,
     dst_prefix IPv6,
     next_addr IPv6,
+    encounter_ttls Array(UInt8),
     PRIMARY KEY (ip_addr, dst_prefix, next_addr)
 ) ENGINE = MergeTree()
 ORDER BY (ip_addr, dst_prefix, next_addr)`
@@ -195,6 +196,7 @@ func TruncateTables(
 ) error {
 	for _, tableName := range tablesToTruncate {
 
+		// raw := `TRUNCATE TABLE %s.%s`
 		raw := `TRUNCATE TABLE %s.%s`
 
 		truncateQuery := fmt.Sprintf(raw, database, tableName)
@@ -237,7 +239,10 @@ func ComputeRouteTables(
                 %s
             )
         SELECT
-            DISTINCT ip_addr, dst_prefix, next_addr
+            ip_addr,
+            dst_prefix, 
+            next_addr,
+            arrayFlatten(groupUniqArray(encounter_ttls)) as encounter_ttls
         FROM (
             WITH
                 groupUniqArray((probe_ttl, reply_src_addr)) as route_traces,
@@ -245,7 +250,7 @@ func ComputeRouteTables(
                 arrayMap(x -> x.2, route_traces) as address_array,
                 range(toUInt8(arrayMin(ttl_array)), toUInt8(arrayMax(ttl_array) - 1)) as ttl_range,
                 CAST((ttl_array, address_array), 'Map(UInt8, IPv6)') as route_traces_map,
-                arrayMap(i -> (route_traces_map[toUInt8(i)], route_traces_map[toUInt8(i + 1)]), ttl_range) AS links,
+                arrayMap(i -> (route_traces_map[toUInt8(i)], route_traces_map[toUInt8(i + 1)], toUInt8(i)), ttl_range) AS links,
                 arrayFilter(x -> x.1 <> null_ip and x.2 <> null_ip and x.1 <> dst_prefix and x.2 <> dst_prefix, links) as filtered_links,
                 arrayJoin(filtered_links) AS link
             SELECT
@@ -253,7 +258,8 @@ func ComputeRouteTables(
                 probe_src_addr,
                 toIPv6(cutIPv6(probe_dst_addr, 0, 1)) as dst_prefix,
                 link.1 as ip_addr,
-                link.2 as next_addr
+                link.2 as next_addr,
+                link.3 as encounter_ttls
             FROM
                 results_table
             GROUP BY
@@ -269,6 +275,10 @@ func ComputeRouteTables(
                 probe_src_port,
                 probe_protocol
         )
+        GROUP BY 
+            ip_addr,
+            dst_prefix,
+            next_addr
         ORDER BY
             ip_addr,
             dst_prefix,
@@ -326,11 +336,17 @@ func GetScoresFromRouteTables(
 		)
 	}
 
-	raw := `WITH
-    length(groupUniqArray(dst_prefix)) as route_score
+	raw := `
+WITH
+    length(groupUniqArray(dst_prefix)) as route_score,
+    arrayFlatten(groupArray(encounter_ttls)) as ttl_array
 SELECT
     ip_addr,
-    route_score
+    route_score,
+    arrayMin(ttl_array) as min_ttl,
+    arrayMax(ttl_array) as max_ttl,
+    arrayAvg(ttl_array) as avg_ttl,
+    length(ttl_array) as ttl_array_length
 FROM
     (%s)
 %s
@@ -351,12 +367,16 @@ ORDER BY
 
 	var address net.IP
 	var routeScore uint64
+	var minTTL uint8
+	var maxTTL uint8
+	var avgTTL float64
+	var lengthTTL uint64
 
-	header := []byte("ip_addr,score\n")
+	header := []byte("ip_addr,score,min_ttl,max_ttl,avg_ttl,length_ttl\n")
 	outputWriter.Write(header)
 	for rows.Next() {
-		if err := rows.Scan(&address, &routeScore); err == nil {
-			row := []byte(fmt.Sprintf("%q, %v\n", address, routeScore))
+		if err := rows.Scan(&address, &routeScore, &minTTL, &maxTTL, &avgTTL, &lengthTTL); err == nil {
+			row := []byte(fmt.Sprintf("%q, %v, %v, %v, %v, %v\n", address, routeScore, minTTL, maxTTL, avgTTL, lengthTTL))
 			outputWriter.Write(row)
 		} else {
 			return err

@@ -8,9 +8,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"dioptra-io/ufuk-research/internal/copy"
 	"dioptra-io/ufuk-research/internal/iris"
 	"dioptra-io/ufuk-research/internal/log"
-	"dioptra-io/ufuk-research/internal/util"
 )
 
 var (
@@ -49,7 +49,7 @@ func init() {
 	godotenv.Load(".env")
 
 	rootCmd.AddCommand(iris.IrisCmd)
-	rootCmd.AddCommand(util.UtilCmd)
+	rootCmd.AddCommand(util.CopyCmd)
 
 	// Set the persistent flags
 	rootCmd.PersistentFlags().

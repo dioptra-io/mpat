@@ -1,4 +1,4 @@
-package copyiristables
+package irisdata
 
 import (
 	"bufio"
@@ -210,9 +210,9 @@ func (c *DatabaseConfig) UploadTable(tableName string, reader io.Reader) error {
 	return err
 }
 
-func (c *DatabaseConfig) TruncateTable(tableName string) error {
+func (c *DatabaseConfig) DropTable(tableName string) error {
 	query := fmt.Sprintf(
-		"TRUNCATE TABLE %s.%s",
+		"DROP TABLE %s.%s",
 		c.Database,
 		tableName,
 	)

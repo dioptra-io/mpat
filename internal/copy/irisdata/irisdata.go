@@ -1,4 +1,4 @@
-package copyiristables
+package irisdata
 
 import (
 	"math"
@@ -26,13 +26,13 @@ var (
 	fTransferFormat    string
 	fProgress          bool
 	fStopOnError       bool
-	fForceTruncate     bool
+	fForceDelete       bool
 	fParallelDownloads int
 )
 
 var logger = log.GetLogger()
 
-var UtilCopyIrisTablesCmd = &cobra.Command{
+var CopyIrisDataCmd = &cobra.Command{
 	Use:   "copyiristables [measurement-uuids...]",
 	Short: "This is a utility function that downloads and inserts iris tables and uploads them to the dev server.",
 	Long:  "...",
@@ -103,10 +103,15 @@ var UtilCopyIrisTablesCmd = &cobra.Command{
 				logger.Panicf("Cannot create table %s: %v.\n", resultsTableName, err)
 				return
 			} else if exists {
-				if fForceTruncate {
+				if fForceDelete {
 					logger.Infof("Table %s already exists, truncating.\n", resultsTableName)
-					if err := devConfig.TruncateTable(resultsTableName); err != nil {
+					if err := devConfig.DropTable(resultsTableName); err != nil {
 						logger.Panicf("Cannot truncate table %s: %v.\n", resultsTableName, err)
+						return
+					}
+					// Recreate the table if the force delete flag is set.
+					if _, err := devConfig.CreateResultsTableIfNotExists(resultsTableName); err != nil {
+						logger.Panicf("Cannot recreate table: %s.\n", err)
 						return
 					}
 				} else {
@@ -166,46 +171,46 @@ var UtilCopyIrisTablesCmd = &cobra.Command{
 }
 
 func init() {
-	UtilCopyIrisTablesCmd.Flags().
+	CopyIrisDataCmd.Flags().
 		StringVar(&fProdUser, "prod-user", "", "this is the username of the prod.")
-	UtilCopyIrisTablesCmd.Flags().
+	CopyIrisDataCmd.Flags().
 		StringVar(&fProdPassword, "prod-password", "", "this is the password of the prod.")
-	UtilCopyIrisTablesCmd.Flags().
+	CopyIrisDataCmd.Flags().
 		StringVar(&fProdDatabase, "prod-database", "iris", "this flag is the default prod database.")
-	UtilCopyIrisTablesCmd.Flags().
+	CopyIrisDataCmd.Flags().
 		StringVar(&fProdHost, "prod-url", "https://chproxy.iris.dioptra.io", "this is the hostname of the prod server.")
 
-	UtilCopyIrisTablesCmd.Flags().
+	CopyIrisDataCmd.Flags().
 		StringVar(&fDevUser, "dev-user", "admin", "this is the username of the dev.")
-	UtilCopyIrisTablesCmd.Flags().
+	CopyIrisDataCmd.Flags().
 		StringVar(&fDevPassword, "dev-password", "", "this is the password of the dev.")
-	UtilCopyIrisTablesCmd.Flags().
+	CopyIrisDataCmd.Flags().
 		StringVar(&fDevDatabase, "dev-database", "iris", "this flag is the default dev database.")
-	UtilCopyIrisTablesCmd.Flags().
+	CopyIrisDataCmd.Flags().
 		StringVar(&fDevHost, "dev-url", "localhost:9000", "this is the hostname of the dev server.")
 
-	UtilCopyIrisTablesCmd.Flags().
+	CopyIrisDataCmd.Flags().
 		IntVar(&fChunkSize, "chunk-size", 100000, "this is the size of the chunks")
-	UtilCopyIrisTablesCmd.Flags().
+	CopyIrisDataCmd.Flags().
 		StringVar(&fTransferFormat, "transfer-format", "Native", "this is the data type; CSV, Parquet etc.")
-	UtilCopyIrisTablesCmd.Flags().
+	CopyIrisDataCmd.Flags().
 		BoolVar(&fProgress, "progress", false, "display a profress bar instead of logs.")
-	UtilCopyIrisTablesCmd.Flags().
+	CopyIrisDataCmd.Flags().
 		BoolVar(&fStopOnError, "stop-on-error", false, "if set the program halts in case of an error.")
-	UtilCopyIrisTablesCmd.Flags().
-		BoolVar(&fForceTruncate, "force-truncate", false, "this flag is used to truncate the existing tables.")
-	UtilCopyIrisTablesCmd.Flags().
+	CopyIrisDataCmd.Flags().
+		BoolVarP(&fForceDelete, "f", "force-delete", false, "this flag is used to delete the existing tables.")
+	CopyIrisDataCmd.Flags().
 		IntVar(&fParallelDownloads, "parallel-downloads", 16, "this flag sets the parallel number of downloads")
 
-	viper.BindPFlag("prod-user", UtilCopyIrisTablesCmd.Flags().Lookup("prod-user"))
-	viper.BindPFlag("prod-password", UtilCopyIrisTablesCmd.Flags().Lookup("prod-password"))
-	viper.BindPFlag("prod-database", UtilCopyIrisTablesCmd.Flags().Lookup("prod-database"))
-	viper.BindPFlag("prod-url", UtilCopyIrisTablesCmd.Flags().Lookup("prod-url"))
+	viper.BindPFlag("prod-user", CopyIrisDataCmd.Flags().Lookup("prod-user"))
+	viper.BindPFlag("prod-password", CopyIrisDataCmd.Flags().Lookup("prod-password"))
+	viper.BindPFlag("prod-database", CopyIrisDataCmd.Flags().Lookup("prod-database"))
+	viper.BindPFlag("prod-url", CopyIrisDataCmd.Flags().Lookup("prod-url"))
 
-	viper.BindPFlag("dev-user", UtilCopyIrisTablesCmd.Flags().Lookup("dev-user"))
-	viper.BindPFlag("dev-password", UtilCopyIrisTablesCmd.Flags().Lookup("dev-password"))
-	viper.BindPFlag("dev-database", UtilCopyIrisTablesCmd.Flags().Lookup("dev-database"))
-	viper.BindPFlag("dev-url", UtilCopyIrisTablesCmd.Flags().Lookup("dev-url"))
+	viper.BindPFlag("dev-user", CopyIrisDataCmd.Flags().Lookup("dev-user"))
+	viper.BindPFlag("dev-password", CopyIrisDataCmd.Flags().Lookup("dev-password"))
+	viper.BindPFlag("dev-database", CopyIrisDataCmd.Flags().Lookup("dev-database"))
+	viper.BindPFlag("dev-url", CopyIrisDataCmd.Flags().Lookup("dev-url"))
 
 	viper.BindEnv("prod-user", "MPAT_PROD_USER")
 	viper.BindEnv("prod-password", "MPAT_PROD_PASSWORD")
