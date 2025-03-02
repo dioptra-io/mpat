@@ -58,6 +58,7 @@ func (c *ArkClient) CurrentDateString() string {
 	return fmt.Sprintf("%d%02d%02d", currentDate.Year(), int(currentDate.Month()), int(currentDate.Day()))
 }
 
+// Example: cycle_20250101
 func (c *ArkClient) CurrentCycleTableString() string {
 	currentDateString := c.CurrentDateString()
 	return fmt.Sprintf("cycle_%v", currentDateString)
@@ -201,8 +202,6 @@ func (p *ArkClient) ParseJSONlToResultsCSV(wartsReader io.ReadCloser) (io.ReadCl
 }
 
 func (p *ArkClient) UploadConvertedFile(conn clickhouse.Conn, wartReader io.ReadCloser, database, tableName string) error {
-	p.CreateResultsTableIfNotExists(conn, database, tableName)
-
 	insertQuery := p.InsertStatement(database, tableName)
 	batch, err := conn.PrepareBatch(context.Background(), insertQuery)
 	if err != nil {
@@ -343,6 +342,26 @@ INSERT INTO %s.%s (
     round
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	return fmt.Sprintf(rawQuery, database, tableName)
+}
+
+func (p *ArkClient) ValidateResultTable(conn clickhouse.Conn, database, tableName string, resetTable bool) error {
+	if resetTable {
+		err := p.DropTable(conn, database, tableName)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := p.CreateResultsTableIfNotExists(conn, database, tableName); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (p *ArkClient) DropTable(conn clickhouse.Conn, database, tableName string) error {
+	query := `DROP TABLE IF EXISTS %s.%s`
+	return conn.Exec(context.Background(), fmt.Sprintf(query, database, tableName))
 }
 
 func (p *ArkClient) CreateResultsTableIfNotExists(conn clickhouse.Conn, database, tableName string) error {

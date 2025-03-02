@@ -1,6 +1,8 @@
 package arkdata
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -74,11 +76,22 @@ var CopyArkDataCmd = &cobra.Command{
 				continue
 			}
 
-			wartLinks = []string{wartLinks[0]}
+			// wartLinks = []string{wartLinks[0]}
 
 			currentCycleString := arkClient.CurrentCycleTableString()
+			wartTableName := fmt.Sprintf("ark_resutls__%s", currentCycleString)
 
 			logger.Infof("For the %v (%v/%v), there are %v wart files.", currentCycleString, arkClient.Index, arkClient.Length(), len(wartLinks))
+
+			// Create the table if it doesn't exists
+			err = arkClient.ValidateResultTable(conn, fDevDatabase, wartTableName, fForceDelete)
+			if err != nil && fStopOnError {
+				logger.Panicf("Error occured when validating table on dev database, stop on error flag is set so exitting: %v.\n", err)
+				return
+			} else if err != nil && !fStopOnError {
+				logger.Panicf("Error occured when validating table on dev database, stop on error flag is not set so continuing: %v.\n", err)
+				continue
+			}
 
 			var wg sync.WaitGroup
 			rateLimiterCh := make(chan int, fParallelDownloads)
@@ -90,7 +103,7 @@ var CopyArkDataCmd = &cobra.Command{
 
 				go func(i int) {
 					defer wg.Done()
-					err := run(conn, arkClient, wartLinks[i], i, fParallelDownloads, len(wartLinks))
+					err := run(conn, arkClient, wartLinks[i], wartTableName, i, fParallelDownloads, len(wartLinks))
 					<-rateLimiterCh
 					errorCh <- err
 				}(i)
@@ -161,30 +174,33 @@ func init() {
 	viper.BindEnv("dev-url", "MPAT_DEV_HOST")
 }
 
-func run(conn clickhouse.Conn, arkClient *ArkClient, wartLink string, i, numParallel, numFiles int) error {
-	logger.Infof("Started downloading wart file %q.\n", wartLink)
+func run(conn clickhouse.Conn, arkClient *ArkClient, wartLink, tableName string, i, numParallel, numFiles int) error {
+	wartNameSplit := strings.Split(wartLink, "/")
+	wartName := wartNameSplit[len(wartNameSplit)-1]
+
+	logger.Debugf("Started downloading wart file %q.\n", wartName)
 	downloadReadCloser, err := arkClient.DownloadRawFile(wartLink)
 	if err != nil {
 		return err
 	}
 	defer downloadReadCloser.Close()
 
-	logger.Infof("Started decompressing wart file %q.\n", wartLink)
+	logger.Debugf("Started decompressing wart file %q.\n", wartName)
 	decompressReadCloser, err := arkClient.DecompressRawFile(downloadReadCloser)
 	if err != nil {
 		return err
 	}
 	defer decompressReadCloser.Close()
 
-	logger.Infof("Started converting wart file %q.\n", wartLink)
+	logger.Debugf("Started converting wart file %q.\n", wartName)
 	convertedReadCloser, err := arkClient.ConvertDecompressedFile(decompressReadCloser)
 	if err != nil {
 		return err
 	}
 	defer convertedReadCloser.Close()
 
-	logger.Infof("Started uploading wart file %q.\n", wartLink)
-	err = arkClient.UploadConvertedFile(conn, convertedReadCloser, "ark", "ark_cycle_1") // TODO XXX
+	logger.Debugf("Started uploading wart file %q.\n", wartName)
+	err = arkClient.UploadConvertedFile(conn, convertedReadCloser, fDevDatabase, tableName) // TODO XXX
 	if err != nil {
 		return err
 	}
@@ -196,6 +212,6 @@ func run(conn clickhouse.Conn, arkClient *ArkClient, wartLink string, i, numPara
 	//
 	// fmt.Printf("string(data): %v\n", string(data))
 
-	logger.Infof("Ark pipeline %v/%v is finished!\n", i+1, numFiles)
+	logger.Infof("Ark pipeline %v/%v [%v thread(s)] is finished!\n", i+1, numFiles, numParallel)
 	return nil
 }
