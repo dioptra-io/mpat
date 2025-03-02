@@ -198,7 +198,7 @@ func init() {
 	CopyIrisDataCmd.Flags().
 		BoolVar(&fStopOnError, "stop-on-error", false, "if set the program halts in case of an error.")
 	CopyIrisDataCmd.Flags().
-		BoolVarP(&fForceDelete, "f", "force-delete", false, "this flag is used to delete the existing tables.")
+		BoolVar(&fForceDelete, "force-delete", false, "this flag is used to delete the existing tables.")
 	CopyIrisDataCmd.Flags().
 		IntVar(&fParallelDownloads, "parallel-downloads", 16, "this flag sets the parallel number of downloads")
 
