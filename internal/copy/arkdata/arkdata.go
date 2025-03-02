@@ -57,7 +57,8 @@ var CopyArkDataCmd = &cobra.Command{
 		}
 
 		// Will make a better adapter
-		url := strings.TrimPrefix(viper.GetString("dev-url"), "http://")
+		url := viper.GetString("dev-url")
+		url = strings.TrimPrefix(url, "http://")
 		url = strings.TrimPrefix(url, "https://")
 		conn, err := clickhouse.Open(&clickhouse.Options{
 			Addr: []string{url},

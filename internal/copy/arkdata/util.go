@@ -360,7 +360,7 @@ func (p *ArkClient) ValidateResultTable(conn clickhouse.Conn, database, tableNam
 }
 
 func (p *ArkClient) DropTable(conn clickhouse.Conn, database, tableName string) error {
-	query := `DROP TABLE IF EXISTS %s.%s`
+	query := `DROP TABLE IF EXISTS %s.%s;`
 	return conn.Exec(context.Background(), fmt.Sprintf(query, database, tableName))
 }
 
