@@ -95,14 +95,14 @@ var CopyArkDataCmd = &cobra.Command{
 			logger.Infof("For the %v (%v/%v), there are %v wart files.", currentCycleString, arkClient.Index, arkClient.Length(), len(wartLinks))
 
 			// Create the table if it doesn't exists
-			// err = arkClient.ValidateResultTable(conn, viper.GetString("dev-database"), wartTableName, fForceDelete)
-			// if err != nil && fStopOnError {
-			// 	logger.Panicf("Error occured when validating table on dev database, stop on error flag is set so exitting: %v.\n", err)
-			// 	return
-			// } else if err != nil && !fStopOnError {
-			// 	logger.Panicf("Error occured when validating table on dev database, stop on error flag is not set so continuing: %v.\n", err)
-			// 	continue
-			// }
+			err = arkClient.ValidateResultTable(conn, viper.GetString("dev-database"), wartTableName, fForceDelete)
+			if err != nil && fStopOnError {
+				logger.Panicf("Error occured when validating table on dev database, stop on error flag is set so exitting: %v.\n", err)
+				return
+			} else if err != nil && !fStopOnError {
+				logger.Panicf("Error occured when validating table on dev database, stop on error flag is not set so continuing: %v.\n", err)
+				continue
+			}
 
 			var wg sync.WaitGroup
 			rateLimiterCh := make(chan int, fParallelDownloads)
