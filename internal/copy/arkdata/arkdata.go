@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"dioptra-io/ufuk-research/internal/common"
 	"dioptra-io/ufuk-research/internal/log"
 )
 
@@ -57,7 +56,18 @@ var CopyArkDataCmd = &cobra.Command{
 			Index:       0,
 		}
 
-		conn, err := common.NewConnection()
+		// Will make a better adapter
+		url := strings.TrimPrefix(viper.GetString("dev-url"), "http://")
+		url = strings.TrimPrefix(url, "https://")
+		conn, err := clickhouse.Open(&clickhouse.Options{
+			Addr: []string{url},
+			Auth: clickhouse.Auth{
+				Database: viper.GetString("dev-database"),
+				Username: viper.GetString("dev-user"),
+				Password: viper.GetString("dev-password"),
+			},
+			ConnMaxLifetime: time.Hour * 24 * 365,
+		})
 		if err != nil {
 			logger.Panicf("Error while connecting to clickhouse: %v.\n", err)
 			return
@@ -84,7 +94,7 @@ var CopyArkDataCmd = &cobra.Command{
 			logger.Infof("For the %v (%v/%v), there are %v wart files.", currentCycleString, arkClient.Index, arkClient.Length(), len(wartLinks))
 
 			// Create the table if it doesn't exists
-			err = arkClient.ValidateResultTable(conn, fDevDatabase, wartTableName, fForceDelete)
+			err = arkClient.ValidateResultTable(conn, viper.GetString("dev-database"), wartTableName, fForceDelete)
 			if err != nil && fStopOnError {
 				logger.Panicf("Error occured when validating table on dev database, stop on error flag is set so exitting: %v.\n", err)
 				return
