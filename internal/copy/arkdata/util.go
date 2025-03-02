@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os/exec"
 	"regexp"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 )
+
+// Define a struct matching the ClickHouse table schema
 
 type ArkClient struct {
 	// Client related stuff
@@ -198,14 +201,24 @@ func (p *ArkClient) ParseJSONlToResultsCSV(wartsReader io.ReadCloser) (io.ReadCl
 }
 
 func (p *ArkClient) UploadConvertedFile(conn clickhouse.Conn, wartReader io.ReadCloser, database, tableName string) error {
+	p.CreateResultsTableIfNotExists(conn, database, tableName)
+
+	insertQuery := p.InsertStatement(database, tableName)
+	batch, err := conn.PrepareBatch(context.Background(), insertQuery)
+	if err != nil {
+		return err
+	}
+
 	lineScanner := bufio.NewScanner(wartReader)
 	for lineScanner.Scan() {
 		var routeTrace Traceroute
 		line := lineScanner.Bytes()
 		if err := json.Unmarshal(line, &routeTrace); err != nil {
+			logger.Panicf("Error on json parsing: %v.\n", err)
 			return err
 		}
 
+		logger.Debugf("Started uploading %d element(s).\n", len(routeTrace.Flows[0].Replies))
 		// Assumed the flows has always one element.
 		for _, reply := range routeTrace.Flows[0].Replies {
 			captureTimestamp, err := time.Parse(time.RFC3339Nano, reply[0].(string))
@@ -213,53 +226,99 @@ func (p *ArkClient) UploadConvertedFile(conn clickhouse.Conn, wartReader io.Read
 				return err
 			}
 			probeProtocol := routeTrace.ProbeProtocol
-			probeSrcAddr := routeTrace.ProbeSrcAddr
-			probeDstAddr := routeTrace.ProbeDstAddr
+			probeSrcAddr := net.ParseIP(routeTrace.ProbeSrcAddr)
+			probeDstAddr := net.ParseIP(routeTrace.ProbeDstAddr)
 			probeSrcPort := routeTrace.Flows[0].ProbeSrcPort
 			probeDstPort := routeTrace.Flows[0].ProbeDstPort
-			probeTTL := reply[1].(int)
-			quotedTTL := reply[2].(int)
-			replySrcAddr := reply[8].(string)
+			probeTTL := reply[1].(float64)
+			quotedTTL := reply[2].(float64)
+			replySrcAddr := net.ParseIP(reply[8].(string))
 			replyProtocol := 1
 			replyICMPType := 11
 			replyICMPCode := 0
-			replyTTL := reply[5].(int)
-			replySize := reply[6].(int)
-			replyMplsLabels := reply[7].([]any)
-			rtt := reply[9].(int)
+			replyTTL := reply[5].(float64)
+			replySize := reply[6].(float64)
+			// replyMplsLabels := reply[7].([]any)
+			rtt := reply[9].(float64)
 			round := 0
 
-			insertQuery := p.InsertStatement(database, tableName)
-			batch, err := conn.PrepareBatch(context.Background(), insertQuery)
-			if err != nil {
-				return err
+			d := ProbeData{
+				CaptureTimestamp: captureTimestamp,
+				ProbeProtocol:    uint8(probeProtocol),
+				ProbeSrcAddr:     probeSrcAddr,
+				ProbeDstAddr:     probeDstAddr,
+				ProbeSrcPort:     uint16(probeSrcPort),
+				ProbeDstPort:     uint16(probeDstPort),
+				ProbeTTL:         uint8(probeTTL),
+				QuotedTTL:        uint8(quotedTTL),
+				ReplySrcAddr:     replySrcAddr,
+				ReplyProtocol:    uint8(replyProtocol),
+				ReplyICMPType:    uint8(replyICMPType),
+				ReplyICMPCode:    uint8(replyICMPCode),
+				ReplyTTL:         uint8(replyTTL),
+				ReplySize:        uint16(replySize),
+				// For not I am not parsing the MPLS labels.
+				ReplyMPLSLabels: []struct {
+					Label         uint32
+					Exp           uint8
+					BottomOfStack uint8
+					TTL           uint8
+				}{},
+				RTT:   uint16(rtt),
+				Round: uint8(round),
 			}
 
-			batch.Append(captureTimestamp,
-				probeProtocol,
-				probeSrcAddr,
-				probeDstAddr,
-				probeSrcPort,
-				probeDstPort,
-				probeTTL,
-				quotedTTL,
-				replySrcAddr,
-				replyProtocol,
-				replyICMPType,
-				replyICMPCode,
-				replyTTL,
-				replySize,
-				replyMplsLabels,
-				rtt,
-				round)
-
-			if err := batch.Send(); err != nil {
-				return err
-			}
+			batch.Append(d.CaptureTimestamp,
+				d.ProbeProtocol,
+				d.ProbeSrcAddr,
+				d.ProbeDstAddr,
+				d.ProbeSrcPort,
+				d.ProbeDstPort,
+				d.ProbeTTL,
+				d.QuotedTTL,
+				d.ReplySrcAddr,
+				d.ReplyProtocol,
+				d.ReplyICMPType,
+				d.ReplyICMPCode,
+				d.ReplyTTL,
+				d.ReplySize,
+				d.ReplyMPLSLabels,
+				d.RTT,
+				d.Round)
 
 		}
 	}
+
+	if err := batch.Send(); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+type ProbeData struct {
+	CaptureTimestamp time.Time
+	ProbeProtocol    uint8
+	ProbeSrcAddr     net.IP
+	ProbeDstAddr     net.IP
+	ProbeSrcPort     uint16
+	ProbeDstPort     uint16
+	ProbeTTL         uint8
+	QuotedTTL        uint8
+	ReplySrcAddr     net.IP
+	ReplyProtocol    uint8
+	ReplyICMPType    uint8
+	ReplyICMPCode    uint8
+	ReplyTTL         uint8
+	ReplySize        uint16
+	ReplyMPLSLabels  []struct {
+		Label         uint32
+		Exp           uint8
+		BottomOfStack uint8
+		TTL           uint8
+	}
+	RTT   uint16
+	Round uint8
 }
 
 func (p *ArkClient) InsertStatement(database, tableName string) string {

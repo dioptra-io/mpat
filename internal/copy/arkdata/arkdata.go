@@ -184,7 +184,7 @@ func run(conn clickhouse.Conn, arkClient *ArkClient, wartLink string, i, numPara
 	defer convertedReadCloser.Close()
 
 	logger.Infof("Started uploading wart file %q.\n", wartLink)
-	err = arkClient.UploadConvertedFile(conn, convertedReadCloser)
+	err = arkClient.UploadConvertedFile(conn, convertedReadCloser, "ark", "ark_cycle_1") // TODO XXX
 	if err != nil {
 		return err
 	}
