@@ -2,6 +2,8 @@ package iriscmd
 
 import (
 	"github.com/spf13/cobra"
+
+	"dioptra-io/ufuk-research/cmd/iriscmd/irisscorecmd"
 )
 
 var IrisCmd = &cobra.Command{
@@ -13,4 +15,5 @@ var IrisCmd = &cobra.Command{
 }
 
 func init() {
+	IrisCmd.AddCommand(irisscorecmd.IrisScoreCmd)
 }

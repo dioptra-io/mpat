@@ -1,7 +1,6 @@
 package copyarkcmd
 
 import (
-	_ "github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -48,6 +47,8 @@ var CopyArkCmd = &cobra.Command{
 
 		logger.Infof("Connected to databases.\n")
 		logger.Infof("Number of dates to copy is %d, using %d workers.\n", len(datesToFetch), fParallelDownloads)
+
+		panic("not implemented")
 	},
 }
 

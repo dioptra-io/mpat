@@ -113,3 +113,36 @@ ORDER BY (probe_protocol, probe_src_addr, probe_dst_prefix, probe_dst_addr, prob
 `
 	return fmt.Sprintf(formatString, ifExists, tableName)
 }
+
+func SelectRouteTracesLimitOffsetFormat(tableName string, limit, offset int, format string) string {
+	formatString := `
+SELECT
+    probe_dst_addr,
+    probe_src_addr,
+    probe_dst_port,
+    probe_src_port,
+    probe_protocol,
+    groupArray(probe_ttl) as probe_ttls,
+    groupArray(reply_src_addr) as reply_src_addrs,
+    groupArray(capture_timestamp) as capture_timestamps
+FROM 
+    merge('%v', '%v')
+GROUP BY
+    probe_dst_addr,
+    probe_src_addr,
+    probe_dst_port,
+    probe_src_port,
+    probe_protocol
+ORDER BY
+    probe_dst_addr,
+    probe_src_addr,
+    probe_dst_port,
+    probe_src_port,
+    probe_protocol
+WHERE destination_host_reply = false
+LIMIT %d 
+OFFSET %d`
+
+	panic("not implemented")
+	return fmt.Sprintf(formatString, tableName, limit, offset, format)
+}
