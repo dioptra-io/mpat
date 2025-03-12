@@ -1,11 +1,12 @@
-package util
+package copycmd
 
 import (
 	"github.com/spf13/cobra"
 
-	"dioptra-io/ufuk-research/internal/copy/arkdata"
-	"dioptra-io/ufuk-research/internal/copy/irisdata"
+	"dioptra-io/ufuk-research/internal/log"
 )
+
+var logger = log.GetLogger()
 
 var CopyCmd = &cobra.Command{
 	Use:   "copy",
@@ -14,6 +15,7 @@ var CopyCmd = &cobra.Command{
 }
 
 func init() {
-	CopyCmd.AddCommand(irisdata.CopyIrisDataCmd)
-	CopyCmd.AddCommand(arkdata.CopyArkDataCmd)
+	CopyCmd.AddCommand(CopyIrisCmd)
+	// CopyCmd.AddCommand(irisdata.CopyIrisDataCmd)
+	// CopyCmd.AddCommand(arkdata.CopyArkDataCmd)
 }
