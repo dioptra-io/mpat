@@ -1,13 +1,15 @@
-package copycmd
+package copyiriscmd
 
 import (
 	"context"
 	"math"
+	"sync"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
 	"dioptra-io/ufuk-research/pkg/client"
+	"dioptra-io/ufuk-research/pkg/log"
 	"dioptra-io/ufuk-research/pkg/query"
 )
 
@@ -17,6 +19,8 @@ import (
 type contextKey string
 
 var keyForceTableReset contextKey = "keyForceTableReset"
+
+var logger = log.GetLogger()
 
 var (
 	fBefore          string
@@ -88,7 +92,7 @@ var CopyIrisCmd = &cobra.Command{
 		// Run the tables sequentially but chunks in parallel
 		for i, tableName := range args {
 			logger.Infof("Preparing for table %s.\n", tableName)
-			if err := copyTable(ctx, prodClient, researchClient, tableName, finishedNumberOfChunks); err != nil {
+			if err := copyTable(ctx, prodClient, researchClient, tableName, finishedNumberOfChunks, totalNumberOfChunks, chunksPerTable[i]); err != nil {
 				panic(err)
 			}
 			finishedNumberOfChunks += chunksPerTable[i]
@@ -132,7 +136,7 @@ func getRowsPerTable(prodClient client.IrisClient, tableNames []string) ([]int, 
 	return rows, nil
 }
 
-func copyTable(ctx context.Context, prodClient, researchClient client.IrisClient, tableName string, totalNumberOfChunksFinished int) error {
+func copyTable(ctx context.Context, prodClient, researchClient client.IrisClient, tableName string, finishedNumberOfChunks, totalNumberOfChunks, chunks int) error {
 	// Get the parameters from context
 	forceTableReset := ctx.Value(keyForceTableReset).(bool)
 
@@ -156,22 +160,94 @@ func copyTable(ctx context.Context, prodClient, researchClient client.IrisClient
 	if forceTableReset {
 		if _, err := researchSQLAdapter.Exec(query.DropTable(tableName, true)); err != nil {
 			return err
-		} else {
-			logger.Debugf("Dropped table %s as the force-table-reset flag is set.\n", tableName)
 		}
 	}
 
 	// Create the table if not exists
 	if _, err := researchSQLAdapter.Exec(query.CreateResultsTable(tableName, true)); err != nil {
 		return err
-	} else {
-		logger.Debugf("Dropped table %s as the force-table-reset flag is set.\n", tableName)
+	}
+
+	// Get number of rows from the resarch server
+	var researchRows int
+	if err := researchSQLAdapter.QueryRow(query.SelectCount(tableName)).Scan(&researchRows); err != nil {
+		return err
+	}
+
+	if researchRows != 0 {
+		logger.Info("There is already data in the research instance! Skipping...\n")
+		return nil
 	}
 
 	// For performance optimization we are doing this using curl/http as a requests
 	// instead of scanning the rows.
-	logger.Debugf("prodHTTPAdapter: %v\n", prodHTTPAdapter)
-	logger.Debugf("researchHTTPAdapter: %v\n", researchHTTPAdapter)
+	lock := sync.Mutex{}
+	localOrder := 0
+
+	var wg sync.WaitGroup
+	rateLimitedCh := make(chan int, fParallelDownloads)
+
+	for j := 0; j < chunks; j++ {
+		offset := fChunkSize * j
+
+		wg.Add(1)
+		rateLimitedCh <- j
+
+		go func() {
+			logger.Debugf("Started worker %v.\n", j)
+			if err := copyChunk(
+				prodHTTPAdapter,
+				researchHTTPAdapter,
+				tableName,
+				offset,
+			); err != nil {
+				<-rateLimitedCh
+				wg.Done()
+				return
+			}
+			<-rateLimitedCh
+			wg.Done()
+
+			lock.Lock()
+			localOrder += 1
+			lock.Unlock()
+
+			percent := 100 * float64(localOrder) / float64(chunks)
+			totalPercent := 100 * float64(localOrder+finishedNumberOfChunks) / float64(totalNumberOfChunks)
+			logger.Infof("Downloaded chunk (%v/%v %.2f%%)[%v/%v %.2f%%] for table %s.\n",
+				localOrder+finishedNumberOfChunks,
+				totalNumberOfChunks,
+				totalPercent,
+				localOrder,
+				chunks,
+				percent,
+				tableName)
+		}()
+
+	}
+
+	wg.Wait()
+
+	return nil
+}
+
+func copyChunk(prodHTTP, researchHTTP client.ClickHouseHTTPAdapter, tableName string, offset int) error {
+	dataFormat := "Native"
+	selectQuery := query.SelectLimitOffsetFormat(tableName, fChunkSize, offset, dataFormat)
+	insertQuery := query.InsertFormat(tableName, dataFormat)
+
+	downloader, err := prodHTTP.Download(selectQuery)
+	if err != nil {
+		return err
+	}
+
+	uploader, err := researchHTTP.Upload(insertQuery, downloader)
+	if err != nil {
+		panic(err)
+	}
+
+	defer downloader.Close()
+	defer uploader.Close()
 
 	return nil
 }

@@ -3,7 +3,9 @@ package copycmd
 import (
 	"github.com/spf13/cobra"
 
-	"dioptra-io/ufuk-research/internal/log"
+	"dioptra-io/ufuk-research/cmd/copycmd/copyarkcmd"
+	"dioptra-io/ufuk-research/cmd/copycmd/copyiriscmd"
+	"dioptra-io/ufuk-research/pkg/log"
 )
 
 var logger = log.GetLogger()
@@ -15,7 +17,6 @@ var CopyCmd = &cobra.Command{
 }
 
 func init() {
-	CopyCmd.AddCommand(CopyIrisCmd)
-	// CopyCmd.AddCommand(irisdata.CopyIrisDataCmd)
-	// CopyCmd.AddCommand(arkdata.CopyArkDataCmd)
+	CopyCmd.AddCommand(copyiriscmd.CopyIrisCmd)
+	CopyCmd.AddCommand(copyarkcmd.CopyArkCmd)
 }
