@@ -181,7 +181,6 @@ func (p PantraceJSONLToProbeDataConverter) Convert(r io.Reader) (<-chan ProbeRec
 			}
 
 			// This part is litte compilcated since there needs to be a manual conversion.
-
 			for _, reply := range routeTrace.Flows[0].Replies {
 				captureTimestamp, err := time.Parse(time.RFC3339Nano, reply[0].(string))
 				if err != nil {
