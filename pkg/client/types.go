@@ -47,6 +47,10 @@ type ClickHouseHTTPAdapter interface {
 	Upload(query string, r io.Reader) (io.ReadCloser, error)
 }
 
+type ArkHTTPAdapter interface {
+	Download()
+}
+
 // This is the main interface for iris. For now only the clickhouse stuff is implemented.
 // But in the future the API adapter, etc... will also be added there.
 type IrisClient interface {
@@ -58,4 +62,51 @@ type IrisClient interface {
 	// Similar to the `ClickHouseSQLAdapter` however, for more efficient data transfer it
 	// uses http requests.
 	ClickHouseHTTPAdapter(reOpenIfExists bool) (ClickHouseHTTPAdapter, error)
+}
+
+// This is the converter interface that takes a io.Reader and outputs another one while
+// performing the operation.
+type Converter interface {
+	Convert(r io.Reader) (io.Reader, error)
+}
+
+// This is the converter interface that takes a io.Reader and outputs another one while
+// performing the operation. Different from the Closer interface is that the resulting
+// is a io.ReadCloser interface which needs to be closed when finished.
+type ConvertCloser interface {
+	Convert(r io.Reader) (io.ReadCloser, error)
+}
+
+// This is also a converter but instead of returning a io.Reader it retuns a generic
+// readonly chan.
+type ConverterChan[T any] interface {
+	// Here we observe one interesting behavior, since there are two chans there is a possibility
+	// that one is closed and other is not, in a select statement. Thus the caller should check both
+	// channels. Here is an exmaple:
+	//
+	// r := strings.NewReader(str)
+	//
+	// objectsCh, errCh := converter.Convert(r)
+	// continueLoop := true
+	//
+	//	for continueLoop {
+	//		select {
+	//		case rec, ok := <-objectsCh:
+	//			if ok {
+	//              // Do something with rec.
+	//			} else {
+	//				continueLoop = false
+	//			}
+	//		case err, ok := <-errCh:
+	//			if ok {
+	//				panic(err)
+	//			} else {
+	//				continueLoop = false
+	//			}
+	//		}
+	//	}
+	//
+	// We cannot guarantee if the caller would be on the first or the second closed channel
+	// after closing the channels.
+	Convert(r io.Reader) (<-chan T, <-chan error)
 }
