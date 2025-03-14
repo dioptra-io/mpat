@@ -59,3 +59,41 @@ func (c *basicIrisClient) ClickHouseHTTPAdapter(reOpenIfExists bool) (ClickHouse
 	c.httpAdapter = newBasicClickHouseHTTPAdapter(parsedURL)
 	return c.httpAdapter, nil
 }
+
+// Similar thing for Ark
+type ArkClientConfig struct {
+	Username string
+	Password string
+}
+
+type basicArkClient struct {
+	ArkClient
+	cfg         ArkClientConfig
+	httpAdapter ArkHTTPAdapter
+}
+
+func FromArkConfig(cfg ArkClientConfig) ArkClient {
+	return &basicArkClient{
+		cfg:         cfg,
+		httpAdapter: nil,
+	}
+}
+
+func FromParams(username, password string) ArkClient {
+	return FromArkConfig(ArkClientConfig{
+		Username: username,
+		Password: password,
+	})
+}
+
+func (c *basicArkClient) ArkHTTPAdapter(reOpenIfExists bool) (ArkHTTPAdapter, error) {
+	if c.httpAdapter != nil && !reOpenIfExists {
+		return c.httpAdapter, nil
+	} else if c.httpAdapter != nil && reOpenIfExists {
+		if err := c.httpAdapter.Close(); err != nil {
+			return nil, err
+		}
+	}
+	c.httpAdapter = newBasicClickHouseHTTPAdapter(parsedURL)
+	return c.httpAdapter, nil
+}

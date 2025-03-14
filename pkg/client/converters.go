@@ -2,6 +2,7 @@ package client
 
 import (
 	"bufio"
+	"compress/gzip"
 	"encoding/json"
 	"io"
 	"net"
@@ -231,4 +232,21 @@ func (p PantraceJSONLToProbeDataConverter) Convert(r io.Reader) (<-chan ProbeRec
 	}()
 
 	return recordCh, errCh
+}
+
+// very simple GZip decompressor.
+type GZipConverter struct {
+	ConvertCloser
+}
+
+func NewGZipConverter() *GZipConverter {
+	return &GZipConverter{}
+}
+
+func (p GZipConverter) Convert(r io.Reader) (io.ReadCloser, error) {
+	decompressor, err := gzip.NewReader(r)
+	if err != nil {
+		return nil, err
+	}
+	return decompressor, nil
 }

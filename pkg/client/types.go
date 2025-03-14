@@ -47,10 +47,6 @@ type ClickHouseHTTPAdapter interface {
 	Upload(query string, r io.Reader) (io.ReadCloser, error)
 }
 
-type ArkHTTPAdapter interface {
-	Download()
-}
-
 // This is the main interface for iris. For now only the clickhouse stuff is implemented.
 // But in the future the API adapter, etc... will also be added there.
 type IrisClient interface {
@@ -62,6 +58,27 @@ type IrisClient interface {
 	// Similar to the `ClickHouseSQLAdapter` however, for more efficient data transfer it
 	// uses http requests.
 	ClickHouseHTTPAdapter(reOpenIfExists bool) (ClickHouseHTTPAdapter, error)
+}
+
+// This adapter is used for downloading data from the Ark dataset. For more info about
+// the dataset: https://data.caida.org/datasets/topology/ark/ipv4/probe-data/team-1/daily
+type ArkHTTPAdapter interface {
+	// If there is a connection that needs to be closed this should be invoked. Similar
+	// to the ClickHouseHTTPAdapter.
+	Close() error
+
+	// This returns the links for the individual link files.
+	WartLinks(date time.Time) ([]string, error)
+
+	// This function downloads an individual link.
+	Download(wartLink string, date time.Time) (io.ReadCloser, error)
+}
+
+// This is the main adapter for Ark. For not it doesn't have much functionality except
+// the HTTP downloading adapter.
+type ArkClient interface {
+	// Get the http adapter.
+	ArkHTTPAdapter(reOpenIfExists bool) (ArkHTTPAdapter, error)
 }
 
 // This is the converter interface that takes a io.Reader and outputs another one while
