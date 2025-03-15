@@ -94,6 +94,6 @@ func (c *basicArkClient) ArkHTTPAdapter(reOpenIfExists bool) (ArkHTTPAdapter, er
 			return nil, err
 		}
 	}
-	c.httpAdapter = newBasicClickHouseHTTPAdapter(parsedURL)
+	c.httpAdapter = newBasicArkHTTPAdapter(c.cfg.Username, c.cfg.Password)
 	return c.httpAdapter, nil
 }

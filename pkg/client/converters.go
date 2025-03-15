@@ -32,6 +32,7 @@ func NewPantraceConverter(logger *logrus.Logger) *PantraceConverter {
 		exec:       "pantrace",
 		fromFormat: "scamper-trace-warts",
 		toFormat:   "iris",
+		logger:     logger,
 	}
 }
 
@@ -85,7 +86,7 @@ func (p PantraceConverter) Convert(r io.Reader) (io.ReadCloser, error) {
 		defer stderr.Close()
 		if data, err := io.ReadAll(stderr); err != nil {
 			p.logger.Panicf("Error while reading the std err of pantrace comamnd: %v.\n", err)
-		} else {
+		} else if len(data) != 0 {
 			p.logger.Panicf("Error while converting the pantrace: %v.\n", string(data))
 		}
 	}()

@@ -40,3 +40,30 @@ func ParseDateTime(dt string) (time.Time, error) {
 	}
 	return time.Parse("2006-01-02", dt)
 }
+
+func GetUniqueAgentNames(wartLinks []string) []string {
+	unique := make(map[string]struct{})
+
+	for _, url := range wartLinks {
+		parts := strings.Split(url, "/")
+		if len(parts) == 0 {
+			continue
+		}
+		lastPart := parts[len(parts)-1]
+
+		nameParts := strings.Split(lastPart, ".")
+		if len(nameParts) == 0 {
+			continue
+		}
+		firstElement := nameParts[0]
+
+		unique[firstElement] = struct{}{}
+	}
+
+	result := make([]string, 0, len(unique))
+	for key := range unique {
+		result = append(result, key)
+	}
+
+	return result
+}

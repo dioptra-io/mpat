@@ -214,7 +214,7 @@ func copyTable(ctx context.Context, prodClient, researchClient client.IrisClient
 
 			percent := 100 * float64(localOrder) / float64(chunks)
 			totalPercent := 100 * float64(localOrder+finishedNumberOfChunks) / float64(totalNumberOfChunks)
-			logger.Infof("Downloaded chunk (%v/%v %.2f%%)[%v/%v %.2f%%] for table %s.\n",
+			logger.Infof("Processed chunk (%v/%v %.2f%%)[%v/%v %.2f%%] for table %s.\n",
 				localOrder+finishedNumberOfChunks,
 				totalNumberOfChunks,
 				totalPercent,
