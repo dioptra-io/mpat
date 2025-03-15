@@ -93,7 +93,7 @@ var CopyArkCmd = &cobra.Command{
 
 		for i, t := range dateTimeList {
 			wartURLs := wartLinksList[i]
-			tableName := fmt.Sprintf("ark__cycle_%04d%02d%02d", t.Year(), t.Month(), t.Day())
+			tableName := fmt.Sprintf("ark_resutls__cycle_%04d%02d%02d", t.Year(), t.Month(), t.Day())
 
 			if err := run(ctx, arkClient, irisClient, t, wartURLs, totalFilesToDownload, finishedNumberOfFiles, tableName); err != nil {
 				panic(err)
@@ -252,6 +252,15 @@ func download(ctx context.Context, arkHTTPAdapter client.ArkHTTPAdapter, irisSQL
 			} else {
 				// Add the probe ubuffer to the record buffer
 				recordBuffer = append(recordBuffer, record)
+
+				// If we reached the chunk size then insert recods to Clickhouse.
+				if cap(recordBuffer) == chunkSize {
+					err = insert(irisSQLAdapter, recordBuffer, tableName)
+					if err != nil {
+						return err
+					}
+					recordBuffer = make([]client.ProbeRecord, 0)
+				}
 			}
 		case err, ok := <-errCh:
 			if !ok && err != nil {
@@ -260,6 +269,7 @@ func download(ctx context.Context, arkHTTPAdapter client.ArkHTTPAdapter, irisSQL
 		}
 	}
 
+	// Insert the remeaning recids to Clickhouse
 	err = insert(irisSQLAdapter, recordBuffer, tableName)
 	if err != nil {
 		return err
