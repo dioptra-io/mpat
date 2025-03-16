@@ -1,7 +1,6 @@
 package client
 
 import (
-	"fmt"
 	"io"
 
 	"dioptra-io/ufuk-research/pkg/log"
