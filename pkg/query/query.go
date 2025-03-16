@@ -193,7 +193,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
 	return fmt.Sprintf(formatString, tableName)
 }
 
-func SelectRoutes(database string, tableNames []string) string {
+func SelectRoutes(tableNames []string) string {
 	formatString := `
 SELECT
     probe_dst_addr,
@@ -213,7 +213,7 @@ SELECT
     groupArray(rtt) as rtts,
     groupArray(time_exceeded_reply) as time_exceeded_replies
 FROM
-    merge('%s', '%s')
+    %s
 GROUP BY
     probe_dst_addr,
     probe_src_addr,
@@ -231,5 +231,5 @@ GROUP BY
 	for _, tableName := range tableNames {
 		escapedTableNames = append(escapedTableNames, regexp.QuoteMeta(tableName))
 	}
-	return fmt.Sprintf(formatString, database, strings.Join(escapedTableNames, "|"))
+	return fmt.Sprintf(formatString, strings.Join(escapedTableNames, "|"))
 }

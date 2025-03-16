@@ -10,7 +10,7 @@ import (
 	"dioptra-io/ufuk-research/pkg/log"
 )
 
-func retrieveIrisTablestoProcess(args []string) ([]string, []string, error) {
+func retrieveArkTablestoProcess(args []string) ([]string, []string, error) {
 	var resultTableNames []string
 	var routesTableNames []string
 
@@ -29,8 +29,8 @@ func retrieveIrisTablestoProcess(args []string) ([]string, []string, error) {
 	return resultTableNames, routesTableNames, nil
 }
 
-var ScoreIrisCmd = &cobra.Command{
-	Use:   "iris <table-names...>",
+var ScoreArkCmd = &cobra.Command{
+	Use:   "ark",
 	Short: "This script is used to compute the route score for the given tables",
 	Long:  "...",
 	Run: func(cmd *cobra.Command, args []string) {

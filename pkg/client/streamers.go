@@ -11,7 +11,6 @@ import (
 type RouteTraceChunkStreamer struct {
 	bufferSize int
 	sqlAdapter ClickHouseSQLAdapter
-	database   string
 	tableNames []string
 }
 
@@ -54,11 +53,10 @@ func (r RouteTraceChunk) String() string {
 	return fmt.Sprintf("src: '%v:%v' && dst: '%v:%v' && protocol: '%v'", r.ProbeSrcAddr, r.ProbeSrcPort, r.ProbeDstAddr, r.ProbeDstPort, r.ProbeProtocol)
 }
 
-func NewRouteTraceChunkSreamer(sqlAdapter ClickHouseSQLAdapter, bufferSize int, database string, tableNames []string) StreamerChan[RouteTraceChunk] {
+func NewRouteTraceChunkSreamer(sqlAdapter ClickHouseSQLAdapter, bufferSize int, tableNames []string) StreamerChan[RouteTraceChunk] {
 	return &RouteTraceChunkStreamer{
 		bufferSize: bufferSize,
 		sqlAdapter: sqlAdapter,
-		database:   database,
 		tableNames: tableNames,
 	}
 }
@@ -71,7 +69,7 @@ func (p RouteTraceChunkStreamer) Stream() (<-chan RouteTraceChunk, <-chan error)
 		defer close(routeTraceCh)
 		defer close(errCh)
 
-		rows, err := p.sqlAdapter.Query(query.SelectRoutes(p.database, p.tableNames))
+		rows, err := p.sqlAdapter.Query(query.SelectRoutes(p.tableNames))
 		if err != nil {
 			errCh <- err
 			return
@@ -83,7 +81,8 @@ func (p RouteTraceChunkStreamer) Stream() (<-chan RouteTraceChunk, <-chan error)
 
 			if err := rows.Scan(
 				&routeTrace.ProbeDstAddr,
-				&routeTrace.ProbeSrcAddr, &routeTrace.ProbeDstPort,
+				&routeTrace.ProbeSrcAddr,
+				&routeTrace.ProbeDstPort,
 				&routeTrace.ProbeSrcPort,
 				&routeTrace.ProbeProtocol,
 				&routeTrace.ProbeTTLs,

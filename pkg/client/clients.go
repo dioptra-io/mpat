@@ -2,7 +2,9 @@ package client
 
 import (
 	"database/sql"
+	"fmt"
 	"net/url"
+	"strings"
 )
 
 type IrisClientConfig struct {
@@ -58,6 +60,22 @@ func (c *basicIrisClient) ClickHouseHTTPAdapter(reOpenIfExists bool) (ClickHouse
 	}
 	c.httpAdapter = newBasicClickHouseHTTPAdapter(parsedURL)
 	return c.httpAdapter, nil
+}
+
+func (c *basicIrisClient) DatabaseName() (string, error) {
+	// Parse the DSN as a URL
+	u, err := url.Parse(c.cfg.DSN)
+	if err != nil {
+		return "", fmt.Errorf("invalid DSN: %w", err)
+	}
+
+	// Extract the database name
+	dbName := strings.TrimPrefix(u.Path, "/")
+	if dbName == "" {
+		return "", fmt.Errorf("database name not found in DSN")
+	}
+
+	return dbName, nil
 }
 
 // Similar thing for Ark

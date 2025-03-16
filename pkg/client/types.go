@@ -58,6 +58,9 @@ type IrisClient interface {
 	// Similar to the `ClickHouseSQLAdapter` however, for more efficient data transfer it
 	// uses http requests.
 	ClickHouseHTTPAdapter(reOpenIfExists bool) (ClickHouseHTTPAdapter, error)
+
+	// Get database
+	DatabaseName() (string, error)
 }
 
 // This adapter is used for downloading data from the Ark dataset. For more info about
