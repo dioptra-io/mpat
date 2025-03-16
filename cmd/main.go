@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/viper"
 
 	"dioptra-io/ufuk-research/cmd/copycmd"
+	"dioptra-io/ufuk-research/cmd/scorecmd"
 	"dioptra-io/ufuk-research/pkg/log"
 )
 
@@ -47,7 +48,7 @@ var rootCmd = &cobra.Command{
 func init() {
 	godotenv.Load(".env")
 
-	// rootCmd.AddCommand(iriscmd.IrisCmd)
+	rootCmd.AddCommand(scorecmd.ScoreCmd)
 	rootCmd.AddCommand(copycmd.CopyCmd)
 
 	// Bind the variables to viper
