@@ -75,12 +75,10 @@ func ComputeRouteScoresTable(irisClient IrisClient,
 }
 
 func WriteToFile(w io.Writer, irisClient IrisClient) error {
-	sqlAdapter, err := irisClient.ClickHouseSQLAdapter(false)
+	_, err := irisClient.ClickHouseSQLAdapter(false)
 	if err != nil {
 		panic(err)
 	}
-
-	fmt.Printf("sqlAdapter: %v\n", sqlAdapter)
 
 	return nil
 }
