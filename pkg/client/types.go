@@ -138,3 +138,8 @@ type StreamerChan[T any] interface {
 type ProcessorChan[T, E any] interface {
 	Process(<-chan T, <-chan error) (<-chan E, <-chan error)
 }
+
+// This is an uploader with a similar structure to all other Chans.
+type UploaderChan[T any] interface {
+	Upload(<-chan T, <-chan error) (<-chan bool, <-chan error)
+}

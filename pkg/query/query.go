@@ -116,6 +116,59 @@ ORDER BY (probe_protocol, probe_src_addr, probe_dst_prefix, probe_dst_addr, prob
 	return fmt.Sprintf(formatString, ifExists, tableName)
 }
 
+func CreateRoutesTable(tableName string, addIfExists bool) string {
+	ifExists := ""
+	if addIfExists {
+		ifExists = "IF NOT EXISTS"
+	}
+
+	formatString := `
+CREATE TABLE %s %s (
+    ip_addr                 IPv6,
+    next_addr               IPv6,
+    first_capture_timestamp DateTime CODEC(T64, ZSTD(1)),
+    probe_src_addr          IPv6,
+    probe_dst_addr          IPv6,
+    probe_src_port          UInt16,
+    probe_dst_port          UInt16,
+    probe_protocol          UInt8,
+    is_dst_host_reply       UInt8,
+    is_dst_prefix_reply     UInt8,
+    reply_icmp_type         UInt8,
+    reply_icmp_code         UInt8,
+    reply_size              UInt16,
+    rtt                     UInt16,
+    time_exceeded_reply     UInt8,
+    probe_dst_prefix        IPv6 MATERIALIZED toIPv6(cutIPv6(probe_dst_addr, 8, 1))
+) ENGINE = MergeTree ()
+ORDER BY (probe_protocol, probe_src_addr, probe_dst_prefix, probe_dst_addr, probe_src_port, probe_dst_port, ip_addr, first_capture_timestamp, next_addr);
+`
+	return fmt.Sprintf(formatString, ifExists, tableName)
+}
+
+func InsertRoutes(tableName string) string {
+	formatString := `
+INSERT INTO %s (
+    ip_addr,
+    next_addr,
+    first_capture_timestamp,
+    probe_src_addr,
+    probe_dst_addr,
+    probe_src_port,
+    probe_dst_port,
+    probe_protocol,
+    is_dst_host_reply,
+    is_dst_prefix_reply,
+    reply_icmp_type,
+    reply_icmp_code,
+    reply_size,
+    rtt,
+    time_exceeded_reply
+) 
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
+	return fmt.Sprintf(formatString, tableName)
+}
+
 func InsertResultsWithoutMPLSLables(tableName string) string {
 	formatString := `
 INSERT INTO %s (
@@ -134,7 +187,8 @@ INSERT INTO %s (
     reply_ttl, 
     reply_size, 
     rtt, 
-    round) 
+    round
+) 
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
 	return fmt.Sprintf(formatString, tableName)
 }
@@ -172,8 +226,6 @@ GROUP BY
      probe_dst_port,
      probe_src_port,
      probe_protocol
-LIMIT 
-    1000000
 `
 	escapedTableNames := make([]string, 0)
 	for _, tableName := range tableNames {

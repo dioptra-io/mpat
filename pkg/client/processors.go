@@ -30,7 +30,7 @@ type RouteNextHop struct {
 	ReplyICMPCode            uint8
 	ReplySize                uint16
 	RTT                      uint16
-	TimeExceededRepliy       uint8
+	TimeExceededReply        uint8
 }
 
 type RouteTraceChunkProcessor struct {
@@ -160,7 +160,7 @@ func (p *RouteTraceChunkProcessor) process(nh *RouteTraceChunk, streamCh2 chan R
 					ReplyICMPCode:            currentElement.ReplyICMPCode,
 					ReplySize:                currentElement.ReplySize,
 					RTT:                      currentElement.RTT,
-					TimeExceededRepliy:       currentElement.TimeExceededRepliy,
+					TimeExceededReply:        currentElement.TimeExceededRepliy,
 				}
 			}
 		}
