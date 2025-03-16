@@ -127,3 +127,14 @@ type ConverterChan[T any] interface {
 	// after closing the channels.
 	Convert(r io.Reader) (<-chan T, <-chan error)
 }
+
+// Similar to the Converter type interface but this takes the data directly.
+type StreamerChan[T any] interface {
+	// Similar to ConverterChan
+	Stream() (<-chan T, <-chan error)
+}
+
+// This is a processort that essentially converts one set of buffer to another.
+type ProcessorChan[T, E any] interface {
+	Process(<-chan T, <-chan error) (<-chan E, <-chan error)
+}

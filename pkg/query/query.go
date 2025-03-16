@@ -2,6 +2,8 @@ package query
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 )
 
 func SelectCount(tableName string) string {
@@ -135,4 +137,47 @@ INSERT INTO %s (
     round) 
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
 	return fmt.Sprintf(formatString, tableName)
+}
+
+func SelectRoutes(database string, tableNames []string) string {
+	formatString := `
+SELECT
+    probe_dst_addr,
+    probe_src_addr,
+    probe_dst_port,
+    probe_src_port,
+    probe_protocol,
+    groupArray(probe_ttl) as probe_ttls,
+    groupArray(capture_timestamp) as capture_timestamps,
+    groupArray(reply_src_addr) as reply_src_addrs,
+    -- These are the other data useful for later
+    groupArray(destination_host_reply) as destination_host_replies,
+    groupArray(destination_prefix_reply) as destination_prefix_replies,
+    groupArray(reply_icmp_type) as reply_icmp_types,
+    groupArray(reply_icmp_code) as reply_icmp_codes,
+    groupArray(reply_size) as reply_sizes,
+    groupArray(rtt) as rtts,
+    groupArray(time_exceeded_reply) as time_exceeded_replies
+FROM
+    merge('%s', '%s')
+GROUP BY
+    probe_dst_addr,
+    probe_src_addr,
+    probe_dst_port,
+    probe_src_port,
+    probe_protocol
+ ORDER BY
+     probe_dst_addr,
+     probe_src_addr,
+     probe_dst_port,
+     probe_src_port,
+     probe_protocol
+LIMIT 
+    1000000
+`
+	escapedTableNames := make([]string, 0)
+	for _, tableName := range tableNames {
+		escapedTableNames = append(escapedTableNames, regexp.QuoteMeta(tableName))
+	}
+	return fmt.Sprintf(formatString, database, strings.Join(escapedTableNames, "|"))
 }
