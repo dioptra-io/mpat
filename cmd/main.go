@@ -13,15 +13,6 @@ import (
 	"dioptra-io/ufuk-research/pkg/util"
 )
 
-var (
-	fDatabase       string
-	fUser           string
-	fPassword       string
-	fClickhouseHost string
-	fSilent         bool
-	fDebug          bool
-)
-
 var logger = util.GetLogger()
 
 var rootCmd = &cobra.Command{
@@ -31,14 +22,12 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// Set the default arguments for logging
 		logger.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
-		if fSilent {
-			util.SetLogLevel(util.LevelSilent)
+		debug := viper.GetBool("debug")
+
+		if debug {
+			util.SetLogLevel(util.LevelDebug)
 		} else {
-			if fDebug {
-				util.SetLogLevel(util.LevelDebug)
-			} else {
-				util.SetLogLevel(util.LevelNormal)
-			}
+			util.SetLogLevel(util.LevelNormal)
 		}
 
 		logger.Debugln("RootCmd prerun succesfull.")
@@ -51,8 +40,10 @@ func init() {
 	rootCmd.AddCommand(scorecmd.ScoreCmd)
 	rootCmd.AddCommand(copycmd.CopyCmd)
 
+	// Add the silent and debug flag
+	rootCmd.PersistentFlags().Bool("debug", false, "use this to see the debug messages")
+
 	// Bind the variables to viper
-	viper.BindPFlag("silent", rootCmd.PersistentFlags().Lookup("silent"))
 	viper.BindPFlag("debug", rootCmd.PersistentFlags().Lookup("debug"))
 
 	// Configure env variables
