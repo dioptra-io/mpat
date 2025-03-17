@@ -52,7 +52,7 @@ func init() {
 	rootCmd.AddCommand(copycmd.CopyCmd)
 
 	// Bind the variables to viper
-	viper.BindPFlag("slent", rootCmd.PersistentFlags().Lookup("silent"))
+	viper.BindPFlag("silent", rootCmd.PersistentFlags().Lookup("silent"))
 	viper.BindPFlag("debug", rootCmd.PersistentFlags().Lookup("debug"))
 
 	// Configure env variables
