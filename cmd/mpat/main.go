@@ -8,8 +8,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"dioptra-io/ufuk-research/cmd/copycmd"
-	"dioptra-io/ufuk-research/cmd/scorecmd"
+	"dioptra-io/ufuk-research/internal/commands/copy"
+	"dioptra-io/ufuk-research/internal/commands/score"
 	"dioptra-io/ufuk-research/pkg/util"
 )
 
@@ -37,8 +37,8 @@ var rootCmd = &cobra.Command{
 func init() {
 	godotenv.Load(".env")
 
-	rootCmd.AddCommand(scorecmd.ScoreCmd)
-	rootCmd.AddCommand(copycmd.CopyCmd)
+	rootCmd.AddCommand(score.ScoreCmd)
+	rootCmd.AddCommand(copy.CopyCmd)
 
 	// Add the silent and debug flag
 	rootCmd.PersistentFlags().Bool("debug", false, "use this to see the debug messages")

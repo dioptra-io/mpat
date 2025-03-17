@@ -1,4 +1,4 @@
-package copyiriscmd
+package copy
 
 import (
 	"context"
@@ -13,29 +13,9 @@ import (
 	"dioptra-io/ufuk-research/pkg/util"
 )
 
-// This is defined to put and pass values to the functions using context.Context.
-// The key of the context as a string is not best practice as it can suffer from
-// name colisions.
-type contextKey string
-
-var keyForceTableReset contextKey = "keyForceTableReset"
-
 var logger = util.GetLogger()
 
-var (
-	fBefore          string
-	fAfter           string
-	fIrisAPIUser     string
-	fIrisAPIPassword string
-	fIrisAPIUrl      string
-
-	fIrisProdClickHouseDSN     string
-	fIrisResearchClickHouseDSN string
-
-	fParallelDownloads int
-	fForceTableReset   bool
-	fChunkSize         int
-)
+var fIrisProdClickHouseDSN string
 
 var CopyIrisCmd = &cobra.Command{
 	Use:   "iris <table-names...>",

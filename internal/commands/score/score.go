@@ -1,4 +1,4 @@
-package scorecmd
+package score
 
 import (
 	"io"

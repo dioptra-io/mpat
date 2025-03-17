@@ -1,5 +1,5 @@
 build:
-	go build -o mpat cmd/main.go
+	go build -o mpat cmd/mpat/main.go
 copy_iris_tables:
 	xargs -I {} ./mpat copy irisdata {} --force-delete < ./data/meas_uuids.txt
 copy_ark_tables:

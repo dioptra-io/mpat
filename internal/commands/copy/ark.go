@@ -1,4 +1,4 @@
-package copyarkcmd
+package copy
 
 import (
 	"context"
@@ -14,31 +14,14 @@ import (
 	"dioptra-io/ufuk-research/pkg/util"
 )
 
-type contextKey string
-
 var (
 	keyNumParallelDownloads contextKey = "keyNumParallelDownloads"
 	keyChunkSize            contextKey = "keyChunkSize"
-	keyForceTableReset      contextKey = "keyForceTableReset"
 )
 
-var logger = util.GetLogger()
-
 var (
-	fBefore          string
-	fAfter           string
-	fIrisAPIUser     string
-	fIrisAPIPassword string
-	fIrisAPIUrl      string
-
 	fArkAPIUser     string
 	fArkAPIPassword string
-
-	fIrisResearchClickHouseDSN string
-
-	fParallelDownloads int
-	fChunkSize         int
-	fForceTableReset   bool
 )
 
 var CopyArkCmd = &cobra.Command{
