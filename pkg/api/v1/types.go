@@ -2,6 +2,7 @@ package v1
 
 import (
 	"fmt"
+	"net"
 	"time"
 
 	"dioptra-io/ufuk-research/pkg/config"
@@ -42,4 +43,30 @@ func ArkCycleURL(t time.Time) string {
 func ArkWartURL(t time.Time, name string) string {
 	dateString := ArkCycleURL(t)
 	return fmt.Sprintf("%s/%s", dateString, name)
+}
+
+// This represents one row for the Iris results table entry.
+type ProbeRecord struct {
+	CaptureTimestamp time.Time
+	ProbeProtocol    uint8
+	ProbeSrcAddr     net.IP
+	ProbeDstAddr     net.IP
+	ProbeSrcPort     uint16
+	ProbeDstPort     uint16
+	ProbeTTL         uint8
+	QuotedTTL        uint8
+	ReplySrcAddr     net.IP
+	ReplyProtocol    uint8
+	ReplyICMPType    uint8
+	ReplyICMPCode    uint8
+	ReplyTTL         uint8
+	ReplySize        uint16
+	ReplyMPLSLabels  []struct {
+		Label         uint32
+		Exp           uint8
+		BottomOfStack uint8
+		TTL           uint8
+	}
+	RTT   uint16
+	Round uint8
 }

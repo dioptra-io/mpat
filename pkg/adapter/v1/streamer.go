@@ -1,16 +1,18 @@
-package client
+package v1
 
 import (
 	"fmt"
 	"net"
 	"time"
 
+	"dioptra-io/ufuk-research/pkg/adapter"
+	"dioptra-io/ufuk-research/pkg/client"
 	"dioptra-io/ufuk-research/pkg/query"
 )
 
 type RouteTraceChunkStreamer struct {
 	bufferSize int
-	sqlAdapter ClickHouseSQLAdapter
+	sqlAdapter client.DBClient
 	tableNames []string
 }
 
@@ -53,7 +55,7 @@ func (r RouteTraceChunk) String() string {
 	return fmt.Sprintf("src: '%v:%v' && dst: '%v:%v' && protocol: '%v'", r.ProbeSrcAddr, r.ProbeSrcPort, r.ProbeDstAddr, r.ProbeDstPort, r.ProbeProtocol)
 }
 
-func NewRouteTraceChunkSreamer(sqlAdapter ClickHouseSQLAdapter, bufferSize int, tableNames []string) StreamerChan[RouteTraceChunk] {
+func NewRouteTraceChunkSreamer(sqlAdapter client.DBClient, bufferSize int, tableNames []string) adapter.StreamerChan[RouteTraceChunk] {
 	return &RouteTraceChunkStreamer{
 		bufferSize: bufferSize,
 		sqlAdapter: sqlAdapter,

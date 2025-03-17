@@ -85,3 +85,20 @@ func (c *arkClient) GetWartfile(ctx context.Context, cycle apiv1.ArkCycle) ([]ap
 
 	return arkWartFiles, nil
 }
+
+func (c *arkClient) DownloadWart(ctx context.Context, wartFile apiv1.ArkWartFile) (io.ReadCloser, error) {
+	req, err := http.NewRequest("GET", wartFile.URL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.SetBasicAuth(c.username, c.password)
+
+	cli := &http.Client{}
+	resp, err := cli.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.Body, nil
+}

@@ -1,20 +1,22 @@
-package client
+package v1
 
 import (
 	"database/sql"
 
+	"dioptra-io/ufuk-research/pkg/adapter"
+	"dioptra-io/ufuk-research/pkg/client"
 	"dioptra-io/ufuk-research/pkg/query"
 )
 
 type RouteRecordUploader struct {
-	UploaderChan[RouteNextHop]
+	adapter.UploaderChan[RouteNextHop]
 
 	chunkSize  int
-	sqlAdapter ClickHouseSQLAdapter
+	sqlAdapter client.DBClient
 	tableName  string
 }
 
-func NewRouteRecordUploader(sqlAdapter ClickHouseSQLAdapter, chunkSize int, tableName string, resetTable bool) (*RouteRecordUploader, error) {
+func NewRouteRecordUploader(sqlAdapter client.DBClient, chunkSize int, tableName string, resetTable bool) (*RouteRecordUploader, error) {
 	// Drop the table on the research if the flag forceTableReset is set.
 	if resetTable {
 		if _, err := sqlAdapter.Exec(query.DropTable(tableName, true)); err != nil {

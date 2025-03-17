@@ -1,4 +1,4 @@
-package client
+package v1
 
 import (
 	"errors"
@@ -6,6 +6,10 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"dioptra-io/ufuk-research/pkg/adapter"
+	v1 "dioptra-io/ufuk-research/pkg/adapter"
+	"dioptra-io/ufuk-research/pkg/client"
 )
 
 type RouteNextHop struct {
@@ -34,13 +38,13 @@ type RouteNextHop struct {
 }
 
 type RouteTraceChunkProcessor struct {
-	sqlAdapter      ClickHouseSQLAdapter
+	sqlAdapter      client.DBClient
 	routesTableName string
 	bufferSize      int
 	numWorkers      int
 }
 
-func NewRouteTraceChunkProcessor(bufferSize int, numWorkers int) ProcessorChan[RouteTraceChunk, RouteNextHop] {
+func NewRouteTraceChunkProcessor(bufferSize int, numWorkers int) adapter.ProcessorChan[v1.RouteTraceChunk, RouteNextHop] {
 	return &RouteTraceChunkProcessor{
 		bufferSize: bufferSize,
 		numWorkers: numWorkers,
@@ -48,7 +52,7 @@ func NewRouteTraceChunkProcessor(bufferSize int, numWorkers int) ProcessorChan[R
 }
 
 // This is a quite complex method that processes the objects with mutliple workers.
-func (p *RouteTraceChunkProcessor) Process(streamCh <-chan RouteTraceChunk, errCh <-chan error) (<-chan RouteNextHop, <-chan error) {
+func (p *RouteTraceChunkProcessor) Process(streamCh <-chan v1.RouteTraceChunk, errCh <-chan error) (<-chan v1.RouteNextHop, <-chan error) {
 	var wg sync.WaitGroup
 	workerLimiter := make(chan struct{}, p.numWorkers)
 	streamCh2 := make(chan RouteNextHop, p.bufferSize)
@@ -99,7 +103,7 @@ func (p *RouteTraceChunkProcessor) Process(streamCh <-chan RouteTraceChunk, errC
 	return streamCh2, errCh2
 }
 
-func (p *RouteTraceChunkProcessor) process(nh *RouteTraceChunk, streamCh2 chan RouteNextHop, errCh2 chan error) {
+func (p *RouteTraceChunkProcessor) process(nh *v1.RouteTraceChunk, streamCh2 chan v1.RouteNextHop, errCh2 chan error) {
 	// defer func() {
 	// 	if r := recover(); r != nil {
 	// 		errCh2 <- fmt.Errorf("an error occured on the RouteTraceChunkProcessor: %v", r)
@@ -195,7 +199,7 @@ type routeTraceChunkMap struct {
 }
 
 // Create a helper data structure for operations etc.
-func newRouteTraceChunkMap(nh *RouteTraceChunk) *routeTraceChunkMap {
+func newRouteTraceChunkMap(nh *v1.RouteTraceChunk) *routeTraceChunkMap {
 	minTTL := slices.Min(nh.ProbeTTLs)
 	maxTTL := slices.Max(nh.ProbeTTLs)
 	length := maxTTL - minTTL + 1
@@ -231,7 +235,7 @@ func (m *routeTraceChunkMap) TTLToMapIndex(probeTTL uint8) (uint8, error) {
 
 // This inserts to the probeTTL index and it inserts for unique replySrcAddr. If there is already an element
 // then insertion returns false. This means that the first captureTimestamp is registered.
-func (m *routeTraceChunkMap) Insert(nh *RouteTraceChunk, i int) (bool, error) {
+func (m *routeTraceChunkMap) Insert(nh *v1.RouteTraceChunk, i int) (bool, error) {
 	mapIndex, err := m.TTLToMapIndex(nh.ProbeTTLs[i])
 	if err != nil {
 		return false, err

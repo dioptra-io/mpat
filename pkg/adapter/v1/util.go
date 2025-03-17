@@ -1,12 +1,13 @@
-package client
+package v1
 
 import (
 	"io"
 
+	"dioptra-io/ufuk-research/pkg/client"
 	"dioptra-io/ufuk-research/pkg/util"
 )
 
-func ComputeRouteScoresTable(irisClient IrisClient,
+func ComputeRouteScoresTable(irisClient client.IrisClient,
 	resultTableNames,
 	routesTableNames []string,
 	chunkSize,
@@ -72,7 +73,7 @@ func ComputeRouteScoresTable(irisClient IrisClient,
 	return nil
 }
 
-func WriteToFile(w io.Writer, irisClient IrisClient) error {
+func WriteToFile(w io.Writer, irisClient client.IrisClient) error {
 	_, err := irisClient.ClickHouseSQLAdapter(false)
 	if err != nil {
 		panic(err)

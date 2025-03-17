@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"io"
 	"time"
 
 	apiv1 "dioptra-io/ufuk-research/pkg/api/v1"
@@ -51,4 +52,19 @@ type ArkClient interface {
 
 	// Get the wart file
 	GetWartfile(ctx context.Context, cycle apiv1.ArkCycle) ([]apiv1.ArkWartFile, error)
+
+	// Download wart file
+	DownloadWart(ctx context.Context, wartFile apiv1.ArkWartFile) (io.ReadCloser, error)
+}
+
+// This database http adapter is used for processing bulk data which we don't need to
+// invoke Scan for each row.
+type HTTPDBClient interface {
+	// Download function runs a query and returns the readcloser from it. This
+	// is can be read after the function call to stream the data.
+	Download(query string) (io.ReadCloser, error)
+
+	// Upload function gets a readcloser to send the data. Note that it does not
+	// closes the r. Since it also does a request, it also returns a readcloser.
+	Upload(query string, r io.Reader) (io.ReadCloser, error)
 }

@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"dioptra-io/ufuk-research/pkg/client"
+	v1 "dioptra-io/ufuk-research/pkg/client/v1"
 	"dioptra-io/ufuk-research/pkg/util"
 )
 
@@ -46,7 +46,7 @@ var ScoreIrisCmd = &cobra.Command{
 		}
 		defer output.Close()
 
-		irisClient := client.FromDSN(viper.GetString("iris-research-clickhouse-dsn"))
+		irisClient, err := v1.NewClickHouseClient(viper.GetString("iris-research-clickhouse-dsn"))
 
 		err = client.ComputeRouteScoresTable(irisClient, resultTableNames, routesTableNames, fChunkSize, fNumWorkers, fForceTableReset)
 		if err != nil {
