@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/viper"
 
 	"dioptra-io/ufuk-research/pkg/client"
-	"dioptra-io/ufuk-research/pkg/log"
+	"dioptra-io/ufuk-research/pkg/util"
 )
 
 func retrieveIrisTablestoProcess(args []string) ([]string, []string, error) {
@@ -34,7 +34,7 @@ var ScoreIrisCmd = &cobra.Command{
 	Short: "This script is used to compute the route score for the given tables",
 	Long:  "...",
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := log.GetLogger()
+		logger := util.GetLogger()
 		resultTableNames, routesTableNames, err := retrieveIrisTablestoProcess(args)
 		if err != nil {
 			panic(err)

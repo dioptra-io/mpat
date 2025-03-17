@@ -5,10 +5,7 @@ import (
 
 	"dioptra-io/ufuk-research/cmd/copycmd/copyarkcmd"
 	"dioptra-io/ufuk-research/cmd/copycmd/copyiriscmd"
-	"dioptra-io/ufuk-research/pkg/log"
 )
-
-var logger = log.GetLogger()
 
 var CopyCmd = &cobra.Command{
 	Use:   "copy",

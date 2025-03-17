@@ -3,7 +3,7 @@ package client
 import (
 	"io"
 
-	"dioptra-io/ufuk-research/pkg/log"
+	"dioptra-io/ufuk-research/pkg/util"
 )
 
 func ComputeRouteScoresTable(irisClient IrisClient,
@@ -13,7 +13,7 @@ func ComputeRouteScoresTable(irisClient IrisClient,
 	numWorkers int,
 	forceTableReset bool,
 ) error {
-	logger := log.GetLogger()
+	logger := util.GetLogger()
 
 	logger.Infof("Number of results tables to copy is %d, using %d workers.\n", len(resultTableNames), numWorkers)
 
@@ -68,7 +68,6 @@ func ComputeRouteScoresTable(irisClient IrisClient,
 			}
 		}
 	}
-	logger.Infoln("Done!")
 
 	return nil
 }

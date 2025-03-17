@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/viper"
 
 	"dioptra-io/ufuk-research/pkg/client"
-	"dioptra-io/ufuk-research/pkg/log"
 	"dioptra-io/ufuk-research/pkg/query"
 	"dioptra-io/ufuk-research/pkg/util"
 )
@@ -23,7 +22,7 @@ var (
 	keyForceTableReset      contextKey = "keyForceTableReset"
 )
 
-var logger = log.GetLogger()
+var logger = util.GetLogger()
 
 var (
 	fBefore          string

@@ -10,7 +10,7 @@ import (
 
 	"dioptra-io/ufuk-research/cmd/copycmd"
 	"dioptra-io/ufuk-research/cmd/scorecmd"
-	"dioptra-io/ufuk-research/pkg/log"
+	"dioptra-io/ufuk-research/pkg/util"
 )
 
 var (
@@ -22,7 +22,7 @@ var (
 	fDebug          bool
 )
 
-var logger = log.GetLogger()
+var logger = util.GetLogger()
 
 var rootCmd = &cobra.Command{
 	Use:   "mpat [module name]",
@@ -32,12 +32,12 @@ var rootCmd = &cobra.Command{
 		// Set the default arguments for logging
 		logger.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
 		if fSilent {
-			log.SetLogLevel(log.LevelSilent)
+			util.SetLogLevel(util.LevelSilent)
 		} else {
 			if fDebug {
-				log.SetLogLevel(log.LevelDebug)
+				util.SetLogLevel(util.LevelDebug)
 			} else {
-				log.SetLogLevel(log.LevelNormal)
+				util.SetLogLevel(util.LevelNormal)
 			}
 		}
 
