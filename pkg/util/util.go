@@ -1,6 +1,7 @@
 package util
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -66,4 +67,9 @@ func GetUniqueAgentNames(wartLinks []string) []string {
 	}
 
 	return result
+}
+
+func TimeString(t time.Time) string {
+	dateString := fmt.Sprintf("%d%02d%02d", t.Year(), int(t.Month()), int(t.Day()))
+	return dateString
 }

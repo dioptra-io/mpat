@@ -4,12 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"io"
 	"time"
+
+	apiv1 "dioptra-io/ufuk-research/pkg/api/v1"
 )
 
-// I need to get all of thise in one interface becuase go std lib sucks
-type ClickHouseSQLAdapter interface {
+// Database client for low level operations such as running queries etc.
+type DBClient interface {
 	Begin() (*sql.Tx, error)
 	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
 	Close() error
@@ -32,117 +33,22 @@ type ClickHouseSQLAdapter interface {
 	Stats() sql.DBStats
 }
 
-// This clickhouse http adapter is used for processing bulk data which we don't need to
-// invoke Scan for each row.
-type ClickHouseHTTPAdapter interface {
-	// If there is a connection that needs to be closed this should be invoked.
-	Close() error
-
-	// Download function runs a query and returns the readcloser from it. This
-	// is can be read after the function call to stream the data.
-	Download(query string) (io.ReadCloser, error)
-
-	// Upload function gets a readcloser to send the data. Note that it does not
-	// closes the r. Since it also does a request, it also returns a readcloser.
-	Upload(query string, r io.Reader) (io.ReadCloser, error)
-}
-
-// This is the main interface for iris. For now only the clickhouse stuff is implemented.
-// But in the future the API adapter, etc... will also be added there.
+// Iris client implements some of the medhod the Iris API provides. Normally
+// this should include all but due to time constraints the functionality is
+// limited.
 type IrisClient interface {
-	// If not yet created opens a connection to clickhouse using sql.Open and returns the
-	// instance. If the reOpenIfExists is set to true it closes the exsiting connection and
-	// reopens another one.
-	ClickHouseSQLAdapter(reOpenIfExists bool) (ClickHouseSQLAdapter, error)
-
-	// Similar to the `ClickHouseSQLAdapter` however, for more efficient data transfer it
-	// uses http requests.
-	ClickHouseHTTPAdapter(reOpenIfExists bool) (ClickHouseHTTPAdapter, error)
-
-	// Get database
-	DatabaseName() (string, error)
+	// XXX empty for now
 }
 
-// This adapter is used for downloading data from the Ark dataset. For more info about
-// the dataset: https://data.caida.org/datasets/topology/ark/ipv4/probe-data/team-1/daily
-type ArkHTTPAdapter interface {
-	// If there is a connection that needs to be closed this should be invoked. Similar
-	// to the ClickHouseHTTPAdapter.
-	Close() error
-
-	// This returns the links for the individual link files.
-	WartLinks(date time.Time) ([]string, error)
-
-	// This function downloads an individual link.
-	Download(wartLink string, date time.Time) (io.ReadCloser, error)
-}
-
-// This is the main adapter for Ark. For not it doesn't have much functionality except
-// the HTTP downloading adapter.
+// For interacting with Ark IPv4 dataset. For more info about the dataset:
+// https://data.caida.org/datasets/topology/ark/ipv4/probe-data/team-1/daily
 type ArkClient interface {
-	// Get the http adapter.
-	ArkHTTPAdapter(reOpenIfExists bool) (ArkHTTPAdapter, error)
-}
+	// Get the cycles of thise given dates.
+	GetCyclesFor(ctx context.Context, dates []time.Time) ([]apiv1.ArkCycle, error)
 
-// This is the converter interface that takes a io.Reader and outputs another one while
-// performing the operation.
-type Converter interface {
-	Convert(r io.Reader) (io.Reader, error)
-}
+	// Get the cycles of thise given dates.
+	GetCyclesBetween(ctx context.Context, after, before time.Time) ([]apiv1.ArkCycle, error)
 
-// This is the converter interface that takes a io.Reader and outputs another one while
-// performing the operation. Different from the Closer interface is that the resulting
-// is a io.ReadCloser interface which needs to be closed when finished.
-type ConvertCloser interface {
-	Convert(r io.Reader) (io.ReadCloser, error)
-}
-
-// This is also a converter but instead of returning a io.Reader it retuns a generic
-// readonly chan.
-type ConverterChan[T any] interface {
-	// Here we observe one interesting behavior, since there are two chans there is a possibility
-	// that one is closed and other is not, in a select statement. Thus the caller should check both
-	// channels. Here is an exmaple:
-	//
-	// r := strings.NewReader(str)
-	//
-	// objectsCh, errCh := converter.Convert(r)
-	// continueLoop := true
-	//
-	//	for continueLoop {
-	//		select {
-	//		case rec, ok := <-objectsCh:
-	//			if ok {
-	//              // Do something with rec.
-	//			} else {
-	//				continueLoop = false
-	//			}
-	//		case err, ok := <-errCh:
-	//			if ok {
-	//				panic(err)
-	//			} else {
-	//				continueLoop = false
-	//			}
-	//		}
-	//	}
-	//
-	// We cannot guarantee if the caller would be on the first or the second closed channel
-	// after closing the channels.
-	Convert(r io.Reader) (<-chan T, <-chan error)
-}
-
-// Similar to the Converter type interface but this takes the data directly.
-type StreamerChan[T any] interface {
-	// Similar to ConverterChan
-	Stream() (<-chan T, <-chan error)
-}
-
-// This is a processort that essentially converts one set of buffer to another.
-type ProcessorChan[T, E any] interface {
-	Process(<-chan T, <-chan error) (<-chan E, <-chan error)
-}
-
-// This is an uploader with a similar structure to all other Chans.
-type UploaderChan[T any] interface {
-	Upload(<-chan T, <-chan error) (<-chan bool, <-chan error)
+	// Get the wart file
+	GetWartfile(ctx context.Context, cycle apiv1.ArkCycle) ([]apiv1.ArkWartFile, error)
 }
