@@ -44,6 +44,7 @@ var ScoreCmd = &cobra.Command{
 
 func init() {
 	ScoreCmd.AddCommand(ScoreIrisCmd)
+	ScoreCmd.AddCommand(ScoreArkCmd)
 
 	// Flags
 	ScoreCmd.PersistentFlags().StringVar(&fBefore, "before", config.DefaultBeforeTimeFlag, "use this to retrieve data before this time")
