@@ -1,7 +1,7 @@
 .PHONY: count-go-lines count-total-go-lines test build
 
 build:
-	go build -o mpat cmd/mpat/main.go
+	go build -o build/mpat cmd/mpat/main.go
 
 test:
 	go test ./...
