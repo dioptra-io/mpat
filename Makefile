@@ -1,6 +1,16 @@
+.PHONY: count-go-lines count-total-go-lines test build
+
 build:
 	go build -o mpat cmd/mpat/main.go
-copy_iris_tables:
-	xargs -I {} ./mpat copy irisdata {} --force-delete < ./data/meas_uuids.txt
-copy_ark_tables:
-	./mpat copy arkdata '2025-01-01' '2025-02-01' --force-delete
+
+test:
+	go test ./...
+
+clean:
+	go clean --modcache
+
+count-go-lines:
+	@find . -name "*.go" -exec wc -l {} +
+
+count-total-go-lines:
+	@make count-go-lines | grep -e total | awk '{print $$1}'
