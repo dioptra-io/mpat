@@ -48,6 +48,9 @@ var ScoreArkCmd = &cobra.Command{
 		defer output.Close()
 
 		irisCHClient, err := clientv1.NewClickHouseClient(viper.GetString("iris-research-clickhouse-dsn"))
+		if err != nil {
+			panic(err)
+		}
 
 		err = adapterv1.ComputeRouteScoresTable(irisCHClient, resultTableNames, routesTableNames, fChunkSize, fNumWorkers, fForceTableReset)
 		if err != nil {
