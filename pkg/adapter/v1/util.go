@@ -7,7 +7,7 @@ import (
 	"dioptra-io/ufuk-research/pkg/util"
 )
 
-func ComputeRouteScoresTable(irisClient client.IrisClient,
+func ComputeRouteScoresTable(irisCHClient client.DBClient,
 	resultTableNames,
 	routesTableNames []string,
 	chunkSize,
@@ -23,11 +23,6 @@ func ComputeRouteScoresTable(irisClient client.IrisClient,
 		return nil
 	} else {
 		logger.Infoln("Force table reset flag is set to true, commencing route table computation.")
-	}
-
-	sqlAdapter, err := irisClient.ClickHouseSQLAdapter(false)
-	if err != nil {
-		panic(err)
 	}
 
 	numTables := len(resultTableNames)
@@ -47,9 +42,9 @@ func ComputeRouteScoresTable(irisClient client.IrisClient,
 			routesTableName)
 
 		// Get the route traces from the merge
-		streamer := NewRouteTraceChunkSreamer(sqlAdapter, chunkSize, []string{resultTableName})
+		streamer := NewRouteTraceChunkSreamer(irisCHClient, chunkSize, []string{resultTableName})
 		processor := NewRouteTraceChunkProcessor(chunkSize, numWorkers)
-		uploader, err := NewRouteRecordUploader(sqlAdapter, chunkSize, routesTableName, forceTableReset)
+		uploader, err := NewRouteRecordUploader(irisCHClient, chunkSize, routesTableName, forceTableReset)
 		if err != nil {
 			panic(err)
 		}
@@ -73,11 +68,7 @@ func ComputeRouteScoresTable(irisClient client.IrisClient,
 	return nil
 }
 
-func WriteToFile(w io.Writer, irisClient client.IrisClient) error {
-	_, err := irisClient.ClickHouseSQLAdapter(false)
-	if err != nil {
-		panic(err)
-	}
-
+func WriteToFile(w io.Writer, irisClient client.DBClient) error {
+	panic("not implemented")
 	return nil
 }

@@ -1,11 +1,8 @@
 package v1
 
 import (
-	"fmt"
-	"net"
-	"time"
-
 	"dioptra-io/ufuk-research/pkg/adapter"
+	apiv1 "dioptra-io/ufuk-research/pkg/api/v1"
 	"dioptra-io/ufuk-research/pkg/client"
 	"dioptra-io/ufuk-research/pkg/query"
 )
@@ -16,46 +13,7 @@ type RouteTraceChunkStreamer struct {
 	tableNames []string
 }
 
-// This represents one row for the Iris results table entry.
-type RouteTraceChunk struct {
-	ProbeDstAddr      net.IP      `json:"probe_dst_addr"`
-	ProbeSrcAddr      net.IP      `json:"probe_src_addr"`
-	ProbeDstPort      uint16      `json:"probe_dst_port"`
-	ProbeSrcPort      uint16      `json:"probe_src_port"`
-	ProbeProtocol     uint8       `json:"probe_protocol"`
-	ProbeTTLs         []uint8     `json:"probe_ttls"`         // groupArray of probe_ttl
-	CaptureTimestamps []time.Time `json:"capture_timestamps"` // groupArray of capture_timestamp
-	ReplySrcAddrs     []net.IP    `json:"reply_src_addrs"`    // groupArray of reply_src_addr
-
-	DestinationHostReplies   []uint8  `json:"destination_host_replies"`   // groupArray of destination_host_reply
-	DestinationPrefixReplies []uint8  `json:"destination_prefix_replies"` // groupArray of destination_prefix_reply
-	ReplyICMPTypes           []uint8  `json:"reply_icmp_types"`           // groupArray of reply_icmp_type
-	ReplyICMPCodes           []uint8  `json:"reply_icmp_codes"`           // groupArray of reply_icmp_code
-	ReplySizes               []uint16 `json:"reply_sizes"`                // groupArray of reply_size
-	RTTs                     []uint16 `json:"rtts"`                       // groupArray of rtt
-	TimeExceededReplies      []uint8  `json:"time_exceeded_replies"`      // groupArray of time_exceeded_reply
-}
-
-// Check if two of the route traces has the same  flow ids.
-func (r RouteTraceChunk) FlowidEq(r2 RouteTraceChunk) bool {
-	return r.ProbeDstAddr.Equal(r2.ProbeDstAddr) &&
-		r.ProbeSrcAddr.Equal(r2.ProbeSrcAddr) &&
-		r.ProbeSrcPort == r2.ProbeSrcPort &&
-		r.ProbeDstPort == r2.ProbeDstPort &&
-		r.ProbeProtocol == r2.ProbeProtocol
-}
-
-// Check if two of the route traces has the same  flow ids.
-func (r RouteTraceChunk) Length() int {
-	return len(r.ProbeTTLs)
-}
-
-// Check if two of the route traces has the same  flow ids.
-func (r RouteTraceChunk) String() string {
-	return fmt.Sprintf("src: '%v:%v' && dst: '%v:%v' && protocol: '%v'", r.ProbeSrcAddr, r.ProbeSrcPort, r.ProbeDstAddr, r.ProbeDstPort, r.ProbeProtocol)
-}
-
-func NewRouteTraceChunkSreamer(sqlAdapter client.DBClient, bufferSize int, tableNames []string) adapter.StreamerChan[RouteTraceChunk] {
+func NewRouteTraceChunkSreamer(sqlAdapter client.DBClient, bufferSize int, tableNames []string) adapter.StreamerChan[apiv1.RouteTraceChunk] {
 	return &RouteTraceChunkStreamer{
 		bufferSize: bufferSize,
 		sqlAdapter: sqlAdapter,
@@ -63,8 +21,8 @@ func NewRouteTraceChunkSreamer(sqlAdapter client.DBClient, bufferSize int, table
 	}
 }
 
-func (p RouteTraceChunkStreamer) Stream() (<-chan RouteTraceChunk, <-chan error) {
-	routeTraceCh := make(chan RouteTraceChunk, p.bufferSize)
+func (p RouteTraceChunkStreamer) Stream() (<-chan apiv1.RouteTraceChunk, <-chan error) {
+	routeTraceCh := make(chan apiv1.RouteTraceChunk, p.bufferSize)
 	errCh := make(chan error)
 
 	go func() {
@@ -79,7 +37,7 @@ func (p RouteTraceChunkStreamer) Stream() (<-chan RouteTraceChunk, <-chan error)
 		defer rows.Close()
 
 		for rows.Next() {
-			var routeTrace RouteTraceChunk
+			var routeTrace apiv1.RouteTraceChunk
 
 			if err := rows.Scan(
 				&routeTrace.ProbeDstAddr,

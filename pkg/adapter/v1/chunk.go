@@ -7,35 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"dioptra-io/ufuk-research/pkg/adapter"
-	v1 "dioptra-io/ufuk-research/pkg/adapter"
+	adapterv1 "dioptra-io/ufuk-research/pkg/adapter"
+	apiv1 "dioptra-io/ufuk-research/pkg/api/v1"
 	"dioptra-io/ufuk-research/pkg/client"
 )
-
-type RouteNextHop struct {
-	// Most important data.
-	IPAddr   net.IP
-	NextAddr net.IP
-
-	// Additionalt metadata.
-	FirstCaptureTimestamp time.Time
-
-	// Flowid
-	ProbeSrcAddr  net.IP
-	ProbeDstAddr  net.IP // Destination prefix can be found from this
-	ProbeSrcPort  uint16
-	ProbeDstPort  uint16
-	ProbeProtocol uint8
-
-	// These are the other info might me useful with the next hop row
-	IsDestinationHostReply   uint8
-	IsDestinationPrefixReply uint8
-	ReplyICMPType            uint8
-	ReplyICMPCode            uint8
-	ReplySize                uint16
-	RTT                      uint16
-	TimeExceededReply        uint8
-}
 
 type RouteTraceChunkProcessor struct {
 	sqlAdapter      client.DBClient
@@ -44,7 +19,7 @@ type RouteTraceChunkProcessor struct {
 	numWorkers      int
 }
 
-func NewRouteTraceChunkProcessor(bufferSize int, numWorkers int) adapter.ProcessorChan[v1.RouteTraceChunk, RouteNextHop] {
+func NewRouteTraceChunkProcessor(bufferSize int, numWorkers int) adapterv1.ProcessorChan[apiv1.RouteTraceChunk, apiv1.RouteNextHop] {
 	return &RouteTraceChunkProcessor{
 		bufferSize: bufferSize,
 		numWorkers: numWorkers,
@@ -52,10 +27,10 @@ func NewRouteTraceChunkProcessor(bufferSize int, numWorkers int) adapter.Process
 }
 
 // This is a quite complex method that processes the objects with mutliple workers.
-func (p *RouteTraceChunkProcessor) Process(streamCh <-chan v1.RouteTraceChunk, errCh <-chan error) (<-chan v1.RouteNextHop, <-chan error) {
+func (p *RouteTraceChunkProcessor) Process(streamCh <-chan apiv1.RouteTraceChunk, errCh <-chan error) (<-chan apiv1.RouteNextHop, <-chan error) {
 	var wg sync.WaitGroup
 	workerLimiter := make(chan struct{}, p.numWorkers)
-	streamCh2 := make(chan RouteNextHop, p.bufferSize)
+	streamCh2 := make(chan apiv1.RouteNextHop, p.bufferSize)
 
 	// If we have failures on all of the workers, we don't want the err channel to block them
 	errCh2 := make(chan error, p.numWorkers)
@@ -103,7 +78,7 @@ func (p *RouteTraceChunkProcessor) Process(streamCh <-chan v1.RouteTraceChunk, e
 	return streamCh2, errCh2
 }
 
-func (p *RouteTraceChunkProcessor) process(nh *v1.RouteTraceChunk, streamCh2 chan v1.RouteNextHop, errCh2 chan error) {
+func (p *RouteTraceChunkProcessor) process(nh *apiv1.RouteTraceChunk, streamCh2 chan apiv1.RouteNextHop, errCh2 chan error) {
 	// defer func() {
 	// 	if r := recover(); r != nil {
 	// 		errCh2 <- fmt.Errorf("an error occured on the RouteTraceChunkProcessor: %v", r)
@@ -144,7 +119,7 @@ func (p *RouteTraceChunkProcessor) process(nh *v1.RouteTraceChunk, streamCh2 cha
 		for _, currentElement := range currentGroup {
 			for _, nextElement := range nextGroup {
 				// Add each corss to the output stream
-				streamCh2 <- RouteNextHop{
+				streamCh2 <- apiv1.RouteNextHop{
 					// timestamp data
 					FirstCaptureTimestamp: currentElement.CaptureTimestamp,
 					// nexthop info
@@ -199,7 +174,7 @@ type routeTraceChunkMap struct {
 }
 
 // Create a helper data structure for operations etc.
-func newRouteTraceChunkMap(nh *v1.RouteTraceChunk) *routeTraceChunkMap {
+func newRouteTraceChunkMap(nh *apiv1.RouteTraceChunk) *routeTraceChunkMap {
 	minTTL := slices.Min(nh.ProbeTTLs)
 	maxTTL := slices.Max(nh.ProbeTTLs)
 	length := maxTTL - minTTL + 1
@@ -235,7 +210,7 @@ func (m *routeTraceChunkMap) TTLToMapIndex(probeTTL uint8) (uint8, error) {
 
 // This inserts to the probeTTL index and it inserts for unique replySrcAddr. If there is already an element
 // then insertion returns false. This means that the first captureTimestamp is registered.
-func (m *routeTraceChunkMap) Insert(nh *v1.RouteTraceChunk, i int) (bool, error) {
+func (m *routeTraceChunkMap) Insert(nh *apiv1.RouteTraceChunk, i int) (bool, error) {
 	mapIndex, err := m.TTLToMapIndex(nh.ProbeTTLs[i])
 	if err != nil {
 		return false, err

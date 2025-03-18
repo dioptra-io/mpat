@@ -25,18 +25,23 @@ type basicHTTPClickHouseClient struct {
 
 var _ client.HTTPDBClient = (*basicHTTPClickHouseClient)(nil)
 
-func NewHTTPClickHouseClient(dsn *url.URL) client.HTTPDBClient {
-	username := dsn.User.Username()
-	password, ok := dsn.User.Password()
+func NewHTTPClickHouseClient(dsn string) (client.HTTPDBClient, error) {
+	parsedURL, err := url.Parse(dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	username := parsedURL.User.Username()
+	password, ok := parsedURL.User.Password()
 	if !ok {
 		password = ""
 	}
-	host := dsn.Host
+	host := parsedURL.Host
 	urlScheme := "http"
-	if dsn.Scheme == "https" {
+	if parsedURL.Scheme == "https" {
 		urlScheme = "https"
 	}
-	database := getDatabaseNameFromDSN(dsn.String())
+	database := getDatabaseNameFromDSN(parsedURL.String())
 
 	// This is required because we cannot use the tcp port with http
 	host = strings.ReplaceAll(host, ":9000", ":8123")
@@ -47,7 +52,7 @@ func NewHTTPClickHouseClient(dsn *url.URL) client.HTTPDBClient {
 		host:     host,
 		scheme:   urlScheme,
 		database: database,
-	}
+	}, nil
 }
 
 // Get the database name from the dsn string. If not found then return "default"

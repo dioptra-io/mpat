@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/viper"
 
 	"dioptra-io/ufuk-research/pkg/client"
+	clientv1 "dioptra-io/ufuk-research/pkg/client/v1"
 	"dioptra-io/ufuk-research/pkg/query"
 	"dioptra-io/ufuk-research/pkg/util"
 )
@@ -36,21 +37,27 @@ var CopyIrisCmd = &cobra.Command{
 
 		logger.Infof("Number of results tables to copy is %d, using %d workers.\n", len(resultTableNames), fParallelDownloads)
 
-		prodClient := client.FromDSN(fIrisProdClickHouseDSN)
-		researchClient := client.FromDSN(fIrisResearchClickHouseDSN)
-
-		// Connect to the prod database
-		if _, err := prodClient.ClickHouseSQLAdapter(true); err != nil {
+		irisProdCHClient, err := clientv1.NewClickHouseClient(fIrisProdClickHouseDSN)
+		if err != nil {
 			panic(err)
 		}
-		// Connect to the research database
-		if _, err := researchClient.ClickHouseSQLAdapter(true); err != nil {
+		irisResearchCHClient, err := clientv1.NewClickHouseClient(fIrisResearchClickHouseDSN)
+		if err != nil {
+			panic(err)
+		}
+
+		irisProdHTTPCHClient, err := clientv1.NewHTTPClickHouseClient(fIrisProdClickHouseDSN)
+		if err != nil {
+			panic(err)
+		}
+		irisResearchHTTPCHClient, err := clientv1.NewHTTPClickHouseClient(fIrisResearchClickHouseDSN)
+		if err != nil {
 			panic(err)
 		}
 
 		logger.Infof("Connected to databases.\n")
 
-		rowsPerTable, err := getRowsPerTable(prodClient, resultTableNames)
+		rowsPerTable, err := getRowsPerTable(irisProdCHClient, resultTableNames)
 		if err != nil {
 			panic(err)
 		}
@@ -72,7 +79,15 @@ var CopyIrisCmd = &cobra.Command{
 		// Run the tables sequentially but chunks in parallel
 		for i, tableName := range args {
 			logger.Infof("Preparing for table %s.\n", tableName)
-			if err := copyTable(ctx, prodClient, researchClient, tableName, finishedNumberOfChunks, totalNumberOfChunks, chunksPerTable[i]); err != nil {
+			if err := copyTable(ctx,
+				irisProdCHClient,
+				irisResearchCHClient,
+				irisProdHTTPCHClient,
+				irisResearchHTTPCHClient,
+				tableName,
+				finishedNumberOfChunks,
+				totalNumberOfChunks,
+				chunksPerTable[i]); err != nil {
 				panic(err)
 			}
 			finishedNumberOfChunks += chunksPerTable[i]
@@ -97,17 +112,12 @@ func init() {
 	viper.BindEnv("iris-research-clickhouse-dsn", "MPAT_IRIS_RESEARCH_DSN")
 }
 
-func getRowsPerTable(prodClient client.IrisClient, tableNames []string) ([]int, error) {
-	prodSQLAdapter, err := prodClient.ClickHouseSQLAdapter(false)
-	if err != nil {
-		return nil, err
-	}
-
+func getRowsPerTable(prodCHClient client.DBClient, tableNames []string) ([]int, error) {
 	rows := make([]int, len(tableNames))
 
 	for i, tableName := range tableNames {
 		var count int
-		if err := prodSQLAdapter.QueryRow(query.SelectCount(tableName)).Scan(&count); err != nil {
+		if err := prodCHClient.QueryRow(query.SelectCount(tableName)).Scan(&count); err != nil {
 			return nil, err
 		}
 		rows[i] = count
@@ -116,41 +126,34 @@ func getRowsPerTable(prodClient client.IrisClient, tableNames []string) ([]int, 
 	return rows, nil
 }
 
-func copyTable(ctx context.Context, prodClient, researchClient client.IrisClient, tableName string, finishedNumberOfChunks, totalNumberOfChunks, chunks int) error {
+func copyTable(ctx context.Context,
+	prodCHClient,
+	researchCHClient client.DBClient,
+	prodHTTPCHClient,
+	researchHTTPCHClient client.HTTPDBClient,
+	tableName string,
+	finishedNumberOfChunks,
+	totalNumberOfChunks,
+	chunks int,
+) error {
 	// Get the parameters from context
 	forceTableReset := ctx.Value(keyForceTableReset).(bool)
 
-	// Get other values
-	prodHTTPAdapter, err := prodClient.ClickHouseHTTPAdapter(false)
-	if err != nil {
-		return err
-	}
-
-	researchSQLAdapter, err := researchClient.ClickHouseSQLAdapter(false)
-	if err != nil {
-		return err
-	}
-
-	researchHTTPAdapter, err := researchClient.ClickHouseHTTPAdapter(false)
-	if err != nil {
-		return err
-	}
-
 	// Drop the table on the research if the flag forceTableReset is set.
 	if forceTableReset {
-		if _, err := researchSQLAdapter.Exec(query.DropTable(tableName, true)); err != nil {
+		if _, err := researchCHClient.Exec(query.DropTable(tableName, true)); err != nil {
 			return err
 		}
 	}
 
 	// Create the table if not exists
-	if _, err := researchSQLAdapter.Exec(query.CreateResultsTable(tableName, true)); err != nil {
+	if _, err := researchCHClient.Exec(query.CreateResultsTable(tableName, true)); err != nil {
 		return err
 	}
 
 	// Get number of rows from the resarch server
 	var researchRows int
-	if err := researchSQLAdapter.QueryRow(query.SelectCount(tableName)).Scan(&researchRows); err != nil {
+	if err := researchCHClient.QueryRow(query.SelectCount(tableName)).Scan(&researchRows); err != nil {
 		return err
 	}
 
@@ -176,8 +179,8 @@ func copyTable(ctx context.Context, prodClient, researchClient client.IrisClient
 		go func() {
 			logger.Debugf("Started worker %v.\n", j)
 			if err := copyChunk(
-				prodHTTPAdapter,
-				researchHTTPAdapter,
+				prodHTTPCHClient,
+				researchHTTPCHClient,
 				tableName,
 				offset,
 			); err != nil {
@@ -211,7 +214,7 @@ func copyTable(ctx context.Context, prodClient, researchClient client.IrisClient
 	return nil
 }
 
-func copyChunk(prodHTTP, researchHTTP client.ClickHouseHTTPAdapter, tableName string, offset int) error {
+func copyChunk(prodHTTP, researchHTTP client.HTTPDBClient, tableName string, offset int) error {
 	dataFormat := "Native"
 	selectQuery := query.SelectLimitOffsetFormat(tableName, fChunkSize, offset, dataFormat)
 	insertQuery := query.InsertFormat(tableName, dataFormat)

@@ -4,12 +4,13 @@ import (
 	"database/sql"
 
 	"dioptra-io/ufuk-research/pkg/adapter"
+	apiv1 "dioptra-io/ufuk-research/pkg/api/v1"
 	"dioptra-io/ufuk-research/pkg/client"
 	"dioptra-io/ufuk-research/pkg/query"
 )
 
 type RouteRecordUploader struct {
-	adapter.UploaderChan[RouteNextHop]
+	adapter.UploaderChan[apiv1.RouteNextHop]
 
 	chunkSize  int
 	sqlAdapter client.DBClient
@@ -35,7 +36,7 @@ func NewRouteRecordUploader(sqlAdapter client.DBClient, chunkSize int, tableName
 	}, nil
 }
 
-func (u *RouteRecordUploader) Upload(streamCh <-chan RouteNextHop, errCh <-chan error) (<-chan bool, <-chan error) {
+func (u *RouteRecordUploader) Upload(streamCh <-chan apiv1.RouteNextHop, errCh <-chan error) (<-chan bool, <-chan error) {
 	// Unbuffered channels
 	doneCh2 := make(chan bool)
 	errCh2 := make(chan error)
@@ -113,7 +114,7 @@ func (u *RouteRecordUploader) prepare() (*sql.Stmt, *sql.Tx, error) {
 	return stmt, tx, nil
 }
 
-func (u *RouteRecordUploader) accumulate(stmt *sql.Stmt, record RouteNextHop) error {
+func (u *RouteRecordUploader) accumulate(stmt *sql.Stmt, record apiv1.RouteNextHop) error {
 	if _, err := stmt.Exec(
 		record.IPAddr,
 		record.NextAddr,

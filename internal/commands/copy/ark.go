@@ -9,9 +9,12 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	internalUtil "dioptra-io/ufuk-research/internal/util"
+	adapterv1 "dioptra-io/ufuk-research/pkg/adapter/v1"
+	apiv1 "dioptra-io/ufuk-research/pkg/api/v1"
 	"dioptra-io/ufuk-research/pkg/client"
+	clientv1 "dioptra-io/ufuk-research/pkg/client/v1"
 	"dioptra-io/ufuk-research/pkg/query"
-	"dioptra-io/ufuk-research/pkg/util"
 )
 
 var (
@@ -29,59 +32,69 @@ var CopyArkCmd = &cobra.Command{
 	Short: "This command is used to copy the Ark data.",
 	Long:  "...",
 	Run: func(cmd *cobra.Command, args []string) {
-		var datesToFetch []string
-		fArkAPIUser := viper.GetString("ark-api-user")
-		fArkAPIPassword := viper.GetString("ark-api-password")
-		fIrisResearchClickHouseDSN := viper.GetString("iris-research-clickhouse-dsn")
+		var dates []time.Time
 
 		// Check if the before or after flags are given. If they are given ignore the arguments
 		if len(fBefore) != 0 || len(fAfter) != 0 {
 			panic("retrieval of the result tables are not supported yet.")
 		} else {
-			// Get the table names from arguments
-			datesToFetch = args
+			// Parse the given arguments into time objects.
+			datesTemp, err := internalUtil.ArgsToDateTime(args)
+			if err != nil {
+				panic(err)
+			}
+			dates = datesTemp
 		}
 
-		irisClient := client.FromDSN(fIrisResearchClickHouseDSN)
-		arkClient := client.FromParams(fArkAPIUser, fArkAPIPassword)
+		irisClient, err := clientv1.NewClickHouseClient(viper.GetString("iris-research-clickhouse-dsn"))
+		if err != nil {
+			panic(err)
+		}
+		arkClient := clientv1.NewArkClient(viper.GetString("ark-api-user"), viper.GetString("ark-api-password"))
+		if err != nil {
+			panic(err)
+		}
 
 		logger.Infof("Connected to databases.\n")
-		logger.Infof("Number of dates to copy is %d, using %d workers.\n", len(datesToFetch), fParallelDownloads)
+		logger.Infof("Number of dates to copy is %d, using %d workers.\n", len(dates), fParallelDownloads)
 
+		// Store some arguemnts in the context.
 		ctx := context.WithValue(context.Background(), keyNumParallelDownloads, fParallelDownloads)
 		ctx = context.WithValue(ctx, keyChunkSize, fChunkSize)
 		ctx = context.WithValue(ctx, keyForceTableReset, fForceTableReset)
 
-		dateTimeList := make([]time.Time, len(datesToFetch))
-		wartLinksList := make([][]string, len(datesToFetch))
+		cycles, err := arkClient.GetCyclesFor(ctx, dates)
+		if err != nil {
+			panic(err)
+		}
+
+		wartLinksList := make([][]apiv1.ArkWartFile, 0)
 		totalFilesToDownload := 0
 		finishedNumberOfFiles := 0
 
-		for i, dateString := range datesToFetch {
-			dateTime, err := util.ParseDateTime(dateString)
+		for _, cycle := range cycles {
+			wartObjects, err := arkClient.GetWartfile(ctx, cycle)
 			if err != nil {
 				panic(err)
 			}
 
-			dateTimeList[i] = dateTime
-			wartLinksList[i], err = getWartLinks(arkClient, dateTime)
-			if err != nil {
-				panic(err)
-			}
-			totalFilesToDownload += len(wartLinksList[i])
+			wartLinksList = append(wartLinksList, wartObjects)
+			totalFilesToDownload += len(wartObjects)
 		}
 
-		logger.Infof("Found total of %d wart files from %d day(s) to download by %d worker(s).\n", totalFilesToDownload, len(dateTimeList), fParallelDownloads)
+		logger.Infof("Found total of %d wart files from %d day(s) to download by %d worker(s).\n", totalFilesToDownload, len(dates), fParallelDownloads)
 
-		for i, t := range dateTimeList {
-			wartURLs := wartLinksList[i]
+		for i, t := range dates {
+			wartFiles := wartLinksList[i]
+
+			// Standardize this!
 			tableName := fmt.Sprintf("ark_resutls__cycle_%04d%02d%02d", t.Year(), t.Month(), t.Day())
 
-			if err := run(ctx, arkClient, irisClient, t, wartURLs, totalFilesToDownload, finishedNumberOfFiles, tableName); err != nil {
+			if err := run(ctx, arkClient, irisClient, t, wartFiles, totalFilesToDownload, finishedNumberOfFiles, tableName); err != nil {
 				panic(err)
 			}
 
-			finishedNumberOfFiles += len(wartURLs)
+			finishedNumberOfFiles += len(wartFiles)
 		}
 	},
 }
@@ -106,49 +119,33 @@ func init() {
 	viper.BindEnv("ark-api-password", "MPAT_ARK_API_PASSWORD")
 }
 
-func getWartLinks(arkClient client.ArkClient, t time.Time) ([]string, error) {
-	arkHTTPAdapter, err := arkClient.ArkHTTPAdapter(false)
-	if err != nil {
-		return nil, err
-	}
-
-	wartLinks, err := arkHTTPAdapter.WartLinks(t)
-	if err != nil {
-		return nil, err
-	}
-
-	return wartLinks, nil
-}
-
-func run(ctx context.Context, arkClient client.ArkClient, irisClient client.IrisClient, t time.Time, wartLinks []string, totalFilesToDownload, finishedNumberOfFiles int, tableName string) error {
+func run(ctx context.Context,
+	arkClient client.ArkClient,
+	irisCHClient client.DBClient,
+	t time.Time,
+	wartFiles []apiv1.ArkWartFile,
+	totalFilesToDownload,
+	finishedNumberOfFiles int,
+	tableName string,
+) error {
 	// Get the parameters from context
 	numParallelDownloads := ctx.Value(keyNumParallelDownloads).(int)
 	forceTableReset := ctx.Value(keyForceTableReset).(bool)
 
-	arkHTTPAdapter, err := arkClient.ArkHTTPAdapter(false)
-	if err != nil {
-		return err
-	}
-
-	irisSQLAdapter, err := irisClient.ClickHouseSQLAdapter(false)
-	if err != nil {
-		return err
-	}
-
 	// Drop the table on the research if the flag forceTableReset is set.
 	if forceTableReset {
-		if _, err := irisSQLAdapter.Exec(query.DropTable(tableName, true)); err != nil {
+		if _, err := irisCHClient.Exec(query.DropTable(tableName, true)); err != nil {
 			return err
 		}
 	}
 
 	// Create the table if not exists
-	if _, err := irisSQLAdapter.Exec(query.CreateResultsTable(tableName, true)); err != nil {
+	if _, err := irisCHClient.Exec(query.CreateResultsTable(tableName, true)); err != nil {
 		return err
 	}
 
 	// agentNames := util.GetUniqueAgentNames(wartLinks)
-	numWartFiles := len(wartLinks)
+	numWartFiles := len(wartFiles)
 
 	// For performance optimization we are doing this using curl/http as a requests
 	// instead of scanning the rows.
@@ -158,15 +155,16 @@ func run(ctx context.Context, arkClient client.ArkClient, irisClient client.Iris
 	var wg sync.WaitGroup
 	rateLimitedCh := make(chan int, numParallelDownloads)
 
-	for j, wartLink := range wartLinks {
+	for j, wartFile := range wartFiles {
 		wg.Add(1)
 		rateLimitedCh <- j
 
 		func() {
+			logger.Debugf("Starting to download wart file %s with url %s.\n", wartFile.Name, wartFile.URL)
 			if err := download(ctx,
-				arkHTTPAdapter,
-				irisSQLAdapter,
-				wartLink,
+				arkClient,
+				irisCHClient,
+				wartFile,
 				t,
 				tableName); err != nil {
 				<-rateLimitedCh
@@ -198,31 +196,31 @@ func run(ctx context.Context, arkClient client.ArkClient, irisClient client.Iris
 	return nil
 }
 
-func download(ctx context.Context, arkHTTPAdapter client.ArkHTTPAdapter, irisSQLAdapter client.ClickHouseSQLAdapter, wartLink string, t time.Time, tableName string) error {
+func download(ctx context.Context, arkClient client.ArkClient, irisSQLAdapter client.DBClient, wartFile apiv1.ArkWartFile, t time.Time, tableName string) error {
 	// // Get the parameters from context
 	chunkSize := ctx.Value(keyChunkSize).(int)
 
-	wartDownloader, err := arkHTTPAdapter.Download(wartLink, t)
+	wartDownloader, err := arkClient.DownloadWart(ctx, wartFile)
 	if err != nil {
 		return err
 	}
 	defer wartDownloader.Close()
 
-	unzipper, err := client.NewGZipConverter().Convert(wartDownloader)
+	unzipper, err := adapterv1.NewGZipConverter().Convert(wartDownloader)
 	if err != nil {
 		return err
 	}
 	defer unzipper.Close()
 
-	pantracer, err := client.NewPantraceConverter(logger).Convert(unzipper)
+	pantracer, err := adapterv1.NewPantraceConverter(logger).Convert(unzipper)
 	if err != nil {
 		return err
 	}
 	defer pantracer.Close()
 
-	recordCh, errCh := client.NewPantraceToProbeRecordConverter(chunkSize, true).Convert(pantracer)
+	recordCh, errCh := adapterv1.NewPantraceToProbeRecordConverter(chunkSize, true).Convert(pantracer)
 
-	recordBuffer := make([]client.ProbeRecord, 0)
+	recordBuffer := make([]apiv1.ProbeRecord, 0)
 
 	shouldContinue := true
 	for shouldContinue {
@@ -241,7 +239,7 @@ func download(ctx context.Context, arkHTTPAdapter client.ArkHTTPAdapter, irisSQL
 					if err != nil {
 						return err
 					}
-					recordBuffer = make([]client.ProbeRecord, 0)
+					recordBuffer = make([]apiv1.ProbeRecord, 0)
 				}
 			}
 		case err, ok := <-errCh:
@@ -261,7 +259,7 @@ func download(ctx context.Context, arkHTTPAdapter client.ArkHTTPAdapter, irisSQL
 }
 
 // Expected a slice thus, the cap is checked.
-func insert(irisSQLAdapter client.ClickHouseSQLAdapter, recordsToInsert []client.ProbeRecord, tableName string) error {
+func insert(irisSQLAdapter client.DBClient, recordsToInsert []apiv1.ProbeRecord, tableName string) error {
 	tx, err := irisSQLAdapter.Begin()
 	if err != nil {
 		return err
