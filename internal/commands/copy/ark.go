@@ -9,9 +9,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	apiv1 "dioptra-io/ufuk-research/api/v1"
 	internalUtil "dioptra-io/ufuk-research/internal/util"
 	adapterv1 "dioptra-io/ufuk-research/pkg/adapter/v1"
-	apiv1 "dioptra-io/ufuk-research/pkg/api/v1"
 	"dioptra-io/ufuk-research/pkg/client"
 	clientv1 "dioptra-io/ufuk-research/pkg/client/v1"
 	"dioptra-io/ufuk-research/pkg/query"

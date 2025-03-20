@@ -7,7 +7,7 @@ import (
 	"io"
 	"time"
 
-	apiv1 "dioptra-io/ufuk-research/pkg/api/v1"
+	apiv1 "dioptra-io/ufuk-research/api/v1"
 )
 
 // Database client for low level operations such as running queries etc.

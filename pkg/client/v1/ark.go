@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	apiv1 "dioptra-io/ufuk-research/pkg/api/v1"
+	apiv1 "dioptra-io/ufuk-research/api/v1"
 	"dioptra-io/ufuk-research/pkg/client"
 	"dioptra-io/ufuk-research/pkg/util"
 )
