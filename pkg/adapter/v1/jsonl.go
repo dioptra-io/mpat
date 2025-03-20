@@ -7,8 +7,8 @@ import (
 	"net"
 	"time"
 
+	apiv1 "dioptra-io/ufuk-research/api/v1"
 	"dioptra-io/ufuk-research/pkg/adapter"
-	apiv1 "dioptra-io/ufuk-research/pkg/api/v1"
 )
 
 // This is used to convert the putput of the pantrace jsonl format to Iris native format.

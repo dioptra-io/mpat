@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
+	apiv1 "dioptra-io/ufuk-research/api/v1"
 	adapterv1 "dioptra-io/ufuk-research/pkg/adapter"
-	apiv1 "dioptra-io/ufuk-research/pkg/api/v1"
 	"dioptra-io/ufuk-research/pkg/client"
 )
 

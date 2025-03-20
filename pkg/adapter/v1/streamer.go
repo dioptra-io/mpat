@@ -1,8 +1,8 @@
 package v1
 
 import (
+	apiv1 "dioptra-io/ufuk-research/api/v1"
 	"dioptra-io/ufuk-research/pkg/adapter"
-	apiv1 "dioptra-io/ufuk-research/pkg/api/v1"
 	"dioptra-io/ufuk-research/pkg/client"
 	"dioptra-io/ufuk-research/pkg/query"
 )
