@@ -215,17 +215,19 @@ SELECT
 FROM
     %s
 GROUP BY
-    probe_dst_addr,
-    probe_src_addr,
-    probe_dst_port,
-    probe_src_port,
-    probe_protocol
- ORDER BY
-     probe_dst_addr,
-     probe_src_addr,
-     probe_dst_port,
-     probe_src_port,
-     probe_protocol
+    probe_protocol, 
+    probe_src_addr, 
+    probe_dst_prefix, 
+    probe_dst_addr, 
+    probe_src_port, 
+    probe_dst_port 
+ORDER BY 
+    probe_protocol, 
+    probe_src_addr, 
+    probe_dst_prefix, 
+    probe_dst_addr, 
+    probe_src_port, 
+    probe_dst_port
 `
 	escapedTableNames := make([]string, 0)
 	for _, tableName := range tableNames {

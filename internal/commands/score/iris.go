@@ -1,6 +1,7 @@
 package score
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -63,5 +64,10 @@ var ScoreIrisCmd = &cobra.Command{
 		}
 
 		logger.Infoln("Done!")
+
+		var ff chan int
+		for f := range ff {
+			fmt.Printf("f: %v\n", f)
+		}
 	},
 }

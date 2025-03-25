@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/joho/godotenv"
@@ -13,12 +14,15 @@ import (
 	"dioptra-io/ufuk-research/pkg/util"
 )
 
+var Version string = "unknown"
+
 var logger = util.GetLogger()
 
 var rootCmd = &cobra.Command{
-	Use:   "mpat [module name]",
-	Short: "MPAT: Measurement Platform Analysis Tool",
-	Long:  "",
+	Use:     "mpat [module name]",
+	Short:   "MPAT: Measurement Platform Analysis Tool",
+	Long:    "",
+	Version: Version,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// Set the default arguments for logging
 		logger.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
@@ -34,11 +38,21 @@ var rootCmd = &cobra.Command{
 	},
 }
 
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Get binary version",
+	Long:  "Get the version of the program",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Printf("mpat version %s\n", Version)
+	},
+}
+
 func init() {
 	godotenv.Load(".env")
 
 	rootCmd.AddCommand(score.ScoreCmd)
 	rootCmd.AddCommand(copy.CopyCmd)
+	rootCmd.AddCommand(versionCmd)
 
 	// Add the silent and debug flag
 	rootCmd.PersistentFlags().Bool("debug", false, "use this to see the debug messages")

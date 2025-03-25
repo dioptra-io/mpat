@@ -70,5 +70,4 @@ func ComputeRouteScoresTable(irisCHClient client.DBClient,
 
 func WriteToFile(w io.Writer, irisClient client.DBClient) error {
 	panic("not implemented")
-	return nil
 }
