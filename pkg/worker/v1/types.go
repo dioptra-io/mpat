@@ -16,10 +16,10 @@ type Worker[T any, K any] interface {
 
 // Get the context and a pointer T (for performance reasons) add many to write only to K. In case of an unrecoverable error
 // return the error to stop pipeline.
-type WorkerFunc[T, K any] func(context.Context, *T, chan<- *K) error
+type WorkerFunc[T, K any] func(context.Context, T, chan<- K) error
 
 // Helper function for worker. Workers can only be cancelled by context.
-func startWorkersFromChannel[T, K any](ctx context.Context, numWorkers int, inCh <-chan *T, outCh chan<- *K, errCh chan<- error, f WorkerFunc[T, K]) {
+func startWorkersFromChannel[T, K any](ctx context.Context, numWorkers int, inCh <-chan T, outCh chan<- K, errCh chan<- error, f WorkerFunc[T, K]) {
 	var wg sync.WaitGroup
 	wg.Add(numWorkers)
 
@@ -54,7 +54,7 @@ func startWorkersFromChannel[T, K any](ctx context.Context, numWorkers int, inCh
 	}()
 }
 
-func startWorkersFromArray[T, K any](ctx context.Context, numWorkers int, inSlice []*T, outCh chan<- *K, errCh chan<- error, f WorkerFunc[T, K]) {
+func startWorkersFromArray[T, K any](ctx context.Context, numWorkers int, inSlice []T, outCh chan<- K, errCh chan<- error, f WorkerFunc[T, K]) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	counter := 0
@@ -68,12 +68,13 @@ func startWorkersFromArray[T, K any](ctx context.Context, numWorkers int, inSlic
 				case <-ctx.Done():
 					return // cancelled by context
 				default:
-					item, ok := func() (*T, bool) {
+					item, ok := func() (T, bool) {
 						mu.Lock()
 						defer mu.Unlock()
+						var zero T
 
 						if counter >= len(inSlice) {
-							return nil, false
+							return zero, false
 						}
 						counter++
 						return inSlice[counter-1], true
