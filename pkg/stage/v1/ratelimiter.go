@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-type RateLimiterWorker[T any] struct {
+type RateLimiterStage[T any] struct {
 	inCh       <-chan T
 	outCh      chan T
 	errCh      chan<- error
@@ -13,10 +13,11 @@ type RateLimiterWorker[T any] struct {
 	ticker     *time.Ticker
 }
 
-func NewRateLimiterWorker[T, K any](maxRatePerSecond int64, inCh <-chan T, errCh chan<- error) Worker[T, T] {
+// This limits the elements passing to the next stage.
+func NewRateLimiterStage[T, K any](maxRatePerSecond int64, inCh <-chan T, errCh chan<- error) Stager[T, T] {
 	ticker := time.NewTicker(1000 * time.Millisecond / time.Duration(maxRatePerSecond))
 
-	return &RateLimiterWorker[T]{
+	return &RateLimiterStage[T]{
 		inCh:   inCh,
 		outCh:  make(chan T), // unbuffered channel
 		errCh:  errCh,
@@ -24,16 +25,16 @@ func NewRateLimiterWorker[T, K any](maxRatePerSecond int64, inCh <-chan T, errCh
 	}
 }
 
-func (w *RateLimiterWorker[T]) Start(ctx context.Context) error {
+func (w *RateLimiterStage[T]) Start(ctx context.Context) error {
 	StartWorkersFromChannel(ctx, 1, w.inCh, w.outCh, w.errCh, w.workerFn, w.exitFn)
 	return nil
 }
 
-func (w *RateLimiterWorker[T]) Output() <-chan T {
+func (w *RateLimiterStage[T]) Output() <-chan T {
 	return w.outCh
 }
 
-func (w *RateLimiterWorker[T]) workerFn(ctx context.Context, t T) ([]T, error) {
+func (w *RateLimiterStage[T]) workerFn(ctx context.Context, t T) ([]T, error) {
 	select {
 	case <-ctx.Done():
 		return []T{}, nil
@@ -42,6 +43,6 @@ func (w *RateLimiterWorker[T]) workerFn(ctx context.Context, t T) ([]T, error) {
 	}
 }
 
-func (w *RateLimiterWorker[T]) exitFn(_ context.Context) {
+func (w *RateLimiterStage[T]) exitFn(_ context.Context) {
 	w.ticker.Stop()
 }

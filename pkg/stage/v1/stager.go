@@ -5,10 +5,10 @@ import (
 	"sync"
 )
 
-// Worker represents a stage with n workers, consumes from InCh() and produces to OutCh().
+// Stager represents a stage with n workers, consumes from InCh() and produces to OutCh().
 // In case of an error it trys to write to ErrCh() and exists.
 // In case of a context cancellation, it directly exists.
-type Worker[T any, K any] interface {
+type Stager[T any, K any] interface {
 	Start(ctx context.Context) error // start the workers
 
 	Output() <-chan K // returns ro out channel
