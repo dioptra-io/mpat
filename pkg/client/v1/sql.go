@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"database/sql"
 	"fmt"
 	"io"
 	"net/http"
@@ -8,13 +9,11 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/ClickHouse/clickhouse-go/v2"
-
-	"dioptra-io/ufuk-research/pkg/client"
+	v1 "github.com/dioptra-io/ufuk-research/api/v1"
 )
 
-type basicHTTPClickHouseClient struct {
-	client.HTTPDBClient
+type SQLClient struct {
+	*sql.DB // embedd sql.DB
 
 	username string
 	password string
@@ -23,34 +22,32 @@ type basicHTTPClickHouseClient struct {
 	database string
 }
 
-var _ client.HTTPDBClient = (*basicHTTPClickHouseClient)(nil)
-
-func NewHTTPClickHouseClient(dsn string) (client.HTTPDBClient, error) {
+func NewSQLClient(dsn string) (*SQLClient, error) {
+	db, err := sql.Open("clickhouse", dsn)
+	if err != nil {
+		return nil, err
+	}
 	parsedURL, err := url.Parse(dsn)
 	if err != nil {
 		return nil, err
 	}
 
 	username := parsedURL.User.Username()
-	password, ok := parsedURL.User.Password()
-	if !ok {
-		password = ""
-	}
+	password, _ := parsedURL.User.Password()
 	host := parsedURL.Host
-	urlScheme := "http"
-	if parsedURL.Scheme == "https" {
-		urlScheme = "https"
-	}
+	scheme := parsedURL.Scheme
+
 	database := getDatabaseNameFromDSN(parsedURL.String())
 
 	// This is required because we cannot use the tcp port with http
-	host = strings.ReplaceAll(host, ":9000", ":8123")
+	// host = strings.ReplaceAll(host, ":9000", ":8123")
 
-	return &basicHTTPClickHouseClient{
+	return &SQLClient{
+		DB:       db, // embed sql
 		username: username,
 		password: password,
 		host:     host,
-		scheme:   urlScheme,
+		scheme:   scheme,
 		database: database,
 	}, nil
 }
@@ -76,7 +73,7 @@ func getDatabaseNameFromDSN(dsn string) string {
 }
 
 // Note that the query should not contain any newline.
-func (a *basicHTTPClickHouseClient) Download(query string) (io.ReadCloser, error) {
+func (a *SQLClient) Download(query string) (io.ReadCloser, error) {
 	baseURL := &url.URL{
 		Scheme: a.scheme,
 		Host:   a.host,
@@ -112,7 +109,7 @@ func (a *basicHTTPClickHouseClient) Download(query string) (io.ReadCloser, error
 }
 
 // Note that the query should not contain any newline.
-func (a *basicHTTPClickHouseClient) Upload(query string, r io.Reader) (io.ReadCloser, error) {
+func (a *SQLClient) Upload(query string, r io.Reader) (io.ReadCloser, error) {
 	baseURL := &url.URL{
 		Scheme: a.scheme,
 		Host:   a.host,
@@ -144,4 +141,20 @@ func (a *basicHTTPClickHouseClient) Upload(query string, r io.Reader) (io.ReadCl
 	}
 
 	return resp.Body, nil
+}
+
+func (a *SQLClient) HealthCheck() error {
+	panic("SQLClient HealthCheck()")
+}
+
+func (a *SQLClient) GetTableInfo(tablesToCheck []string) ([]v1.ResultsTableInfo, error) {
+	panic("SQLClient GetTableInfo")
+}
+
+func (a *SQLClient) DropTableIfNotExists(tableName string) error {
+	panic("SQLClient GetTableInfo")
+}
+
+func (a *SQLClient) CreateResultsTableIfNotExists(tableName string) error {
+	panic("SQLClient GetTableInfo")
 }

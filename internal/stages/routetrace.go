@@ -1,20 +1,25 @@
-package v1
+package stages
 
 import (
 	"context"
 	"time"
+
+	"github.com/ubombar/go-pipeline/pkg/stage"
+
+	apiv1 "github.com/dioptra-io/ufuk-research/api/v1"
 )
 
-type RateLimiterStage[T any] struct {
-	inCh       <-chan T
-	outCh      chan T
+// This stage takes result table names and outputs RouteTraces.
+type RouteTraceStage struct {
+	inCh       <-chan *apiv1.RoutesTableInfo
+	outCh      chan *apiv1.RoutesTableInfo
 	errCh      chan<- error
 	numWorkers int
 	ticker     *time.Ticker
 }
 
 // This limits the elements passing to the next stage.
-func NewRateLimiterStage[T, K any](maxRatePerSecond int64, inCh <-chan T, errCh chan<- error) Stager[T, T] {
+func NewRouteTraceStage[T, K any](maxRatePerSecond int64, inCh <-chan T, errCh chan<- error) stage.Stager[T, T] {
 	ticker := time.NewTicker(1000 * time.Millisecond / time.Duration(maxRatePerSecond))
 
 	return &RateLimiterStage[T]{

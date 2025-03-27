@@ -1,20 +1,12 @@
 package v1
 
-import (
-	"dioptra-io/ufuk-research/pkg/client"
-)
-
-type irisClient struct {
-	client.IrisClient
-
+type IrisClient struct {
 	username string
 	password string
 }
 
-var _ client.IrisClient = (*irisClient)(nil)
-
-func NewIrisClient(username, password string) client.IrisClient {
-	return &irisClient{
+func NewIrisClient(username, password string) *IrisClient {
+	return &IrisClient{
 		username: username,
 		password: password,
 	}

@@ -9,9 +9,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"dioptra-io/ufuk-research/internal/commands/copy"
-	"dioptra-io/ufuk-research/internal/commands/score"
-	"dioptra-io/ufuk-research/pkg/util"
+	"github.com/dioptra-io/ufuk-research/internal/commands/copy"
+	"github.com/dioptra-io/ufuk-research/internal/commands/score"
+	"github.com/dioptra-io/ufuk-research/pkg/util"
 )
 
 var Version string = "unknown"
@@ -50,8 +50,6 @@ var versionCmd = &cobra.Command{
 func init() {
 	godotenv.Load(".env")
 
-	rootCmd.AddCommand(score.ScoreCmd)
-	rootCmd.AddCommand(copy.CopyCmd)
 	rootCmd.AddCommand(versionCmd)
 
 	// Add the silent and debug flag
