@@ -62,7 +62,7 @@ func NewCopyPipeline(
 }
 
 func (p *CopyPipeline) Start(ctx context.Context) error {
-	stage.StartWorkersFromArray(ctx, p.numParallelDownloads, p.elements, p.tableChunkerCh, p.errCh, p.tableInfoToChunkInfo, func(ctx context.Context) {})
+	stage.StartWorkersFromArray(ctx, 1, p.elements, p.tableChunkerCh, p.errCh, p.tableInfoToChunkInfo, func(ctx context.Context) {})
 	stage.StartWorkersFromChannel(ctx, p.numParallelDownloads, p.tableChunkerCh, p.chunkUploaderCh, p.errCh, p.chunkUploaderFn, func(ctx context.Context) {})
 	return nil
 }
