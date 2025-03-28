@@ -1,7 +1,9 @@
 .PHONY: count-go-lines count-total-go-lines test build help check-build check-vet check-all
 
-# Version is received as an environment value
-VERSION=$(shell git describe --tags --always)
+VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+GIT_COMMIT := $(shell git rev-parse --short HEAD)
+BUILD_DATE := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+GO_VERSION := $(shell go version | awk '{print $$3}')
 
 help: ## Display this help message
 	@echo "Makefile for MPAT (Measurement Platform Analysis Tool), the targets are listed below:\\n"
@@ -12,7 +14,11 @@ help: ## Display this help message
 	@echo "\\n"
 
 build: ## Compile the executable under build/mpat
-	go build -ldflags "-X dioptra-io/ufuk-research/cmd/mpat.Version=8cc896c" -o build/mpat cmd/mpat/main.go
+	go build -ldflags "-X main.Version=$(VERSION) \
+		-X main.GitCommit=$(GIT_COMMIT) \
+		-X main.BuildDate=$(BUILD_DATE) \
+		-X main.GoVersion=$(GO_VERSION)" \
+		-o build/mpat cmd/mpat/main.go
 
 test: ## Run go test for all of the packages
 	go test ./...

@@ -4,7 +4,11 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/dioptra-io/ufuk-research/pkg/util"
 )
+
+var logger = util.GetLogger()
 
 func SelectCount(tableName string) string {
 	formatString := `
@@ -30,6 +34,17 @@ func DropTable(tableName string, addIfExists bool) string {
 	}
 	formatString := `
 DROP TABLE %s %s
+`
+	return fmt.Sprintf(formatString, ifExists, tableName)
+}
+
+func TruncateTable(tableName string, addIfExists bool) string {
+	ifExists := ""
+	if addIfExists {
+		ifExists = "IF EXISTS"
+	}
+	formatString := `
+TRUNCATE TABLE %s %s
 `
 	return fmt.Sprintf(formatString, ifExists, tableName)
 }
@@ -234,4 +249,41 @@ ORDER BY
 		escapedTableNames = append(escapedTableNames, regexp.QuoteMeta(tableName))
 	}
 	return fmt.Sprintf(formatString, strings.Join(escapedTableNames, "|"))
+}
+
+func Select1() string {
+	return "SELECT 1"
+}
+
+func SelectTableInfo(database, table string) string {
+	formatString := `
+SELECT 
+    total_rows,
+    total_bytes
+FROM system.tables
+WHERE 
+    database = '%s' AND name = '%s'
+`
+	return fmt.Sprintf(formatString, database, table)
+}
+
+func SelectTablesInfo(database string, tables []string) string {
+	formatString := `
+SELECT 
+    name,
+    total_rows,
+    total_bytes
+FROM system.tables
+WHERE 
+    database = '%s' AND name IN (%s)
+ORDER BY 
+    name
+`
+	quotedNames := make([]string, 0)
+	for i := 0; i < len(tables); i++ {
+		quotedNames = append(quotedNames, fmt.Sprintf("'%s'", tables[i]))
+	}
+	query := fmt.Sprintf(formatString, database, strings.Join(quotedNames, ", "))
+
+	return query
 }

@@ -12,15 +12,9 @@ package v1
 type ResultsTableInfo struct {
 	TableName   string
 	Exists      bool
-	NumRows     int
+	NumRows     uint64
+	NumBytes    uint64
 	ColumnNames []string
-}
-
-type ResultsTableChunkInfo struct {
-	TableName string
-	NumRows   int
-	Limit     int
-	Offset    int
 }
 
 // LOL

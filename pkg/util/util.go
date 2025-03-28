@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -72,4 +73,15 @@ func GetUniqueAgentNames(wartLinks []string) []string {
 func TimeString(t time.Time) string {
 	dateString := fmt.Sprintf("%d%02d%02d", t.Year(), int(t.Month()), int(t.Day()))
 	return dateString
+}
+
+func ExponentialBackoff(i int, maxCap time.Duration) time.Duration {
+	base := 100 * time.Millisecond
+	backoff := float64(base) * math.Pow(2, float64(i))
+
+	// Cap the backoff if it exceeds maxCap
+	if backoff > float64(maxCap) {
+		return maxCap
+	}
+	return time.Duration(backoff)
 }

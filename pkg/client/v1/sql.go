@@ -2,6 +2,7 @@ package v1
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,7 +10,10 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/ClickHouse/clickhouse-go/v2"
+
 	v1 "github.com/dioptra-io/ufuk-research/api/v1"
+	"github.com/dioptra-io/ufuk-research/pkg/query"
 )
 
 type SQLClient struct {
@@ -40,7 +44,10 @@ func NewSQLClient(dsn string) (*SQLClient, error) {
 	database := getDatabaseNameFromDSN(parsedURL.String())
 
 	// This is required because we cannot use the tcp port with http
-	// host = strings.ReplaceAll(host, ":9000", ":8123")
+	if scheme == "tcp" {
+		host = strings.ReplaceAll(host, ":9000", ":8123")
+		scheme = "http"
+	}
 
 	return &SQLClient{
 		DB:       db, // embed sql
@@ -144,17 +151,107 @@ func (a *SQLClient) Upload(query string, r io.Reader) (io.ReadCloser, error) {
 }
 
 func (a *SQLClient) HealthCheck() error {
-	panic("SQLClient HealthCheck()")
+	var one int
+	if err := a.QueryRow(query.Select1()).Scan(&one); err != nil || one != 1 {
+		return err
+	}
+	return nil
 }
 
 func (a *SQLClient) GetTableInfo(tablesToCheck []string) ([]v1.ResultsTableInfo, error) {
-	panic("SQLClient GetTableInfo")
+	// for i, tableName := range tablesToCheck { // this can be optimized bu one query
+	// 	info := v1.ResultsTableInfo{
+	// 		TableName:   tableName,
+	// 		Exists:      false,
+	// 		NumRows:     0,
+	// 		NumBytes:    0,
+	// 		ColumnNames: []string{}, // for now this is not supported
+	// 	}
+	//
+	// 	err := a.QueryRow(query.SelectTableInfo(a.database, tableName)).Scan(&info.NumRows, &info.NumBytes)
+	// 	if err != nil && err != sql.ErrNoRows {
+	// 		return nil, err
+	// 	}
+	//
+	// 	info.Exists = true
+	//
+	// 	infoToReturn[i] = info
+	// }
+	infoToReturn := make([]v1.ResultsTableInfo, len(tablesToCheck))
+
+	for i, tableName := range tablesToCheck { // this can be optimized bu one query
+		info := v1.ResultsTableInfo{
+			TableName:   tableName,
+			Exists:      false, // start with exists false
+			NumRows:     0,
+			NumBytes:    0,
+			ColumnNames: []string{}, // for now this is not supported
+		}
+		infoToReturn[i] = info
+	}
+
+	rows, err := a.Query(query.SelectTablesInfo(a.database, tablesToCheck))
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return infoToReturn, nil
+		}
+		return nil, err
+	}
+
+	current := 0
+	for rows.Next() {
+		var scannedName string
+		var scannedNumRows uint64
+		var scannedNumBytes uint64
+
+		if err := rows.Scan(&scannedName, &scannedNumRows, &scannedNumBytes); err != nil {
+			return nil, err
+		}
+
+		// iterate until it is a match
+		for current < len(infoToReturn) && scannedName != infoToReturn[current].TableName {
+			current++
+		}
+
+		if current >= len(infoToReturn) {
+			return nil, errors.New("there are more elements in query return than we have, connect to maintainer if this happens")
+		}
+
+		infoToReturn[current].Exists = true
+		infoToReturn[current].NumRows = scannedNumRows
+		infoToReturn[current].NumBytes = scannedNumBytes
+
+		// if a.database == "iris" {
+		// 	fmt.Printf("IRIS: %v\n", infoToReturn[current])
+		// } else {
+		// 	fmt.Printf("RESEARCH: %v\n", infoToReturn[current])
+		// }
+		current++
+	}
+
+	return infoToReturn, nil
 }
 
 func (a *SQLClient) DropTableIfNotExists(tableName string) error {
-	panic("SQLClient GetTableInfo")
+	_, err := a.Exec(query.DropTable(tableName, true))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *SQLClient) TruncateTableIfNotExists(tableName string) error {
+	_, err := a.Exec(query.TruncateTable(tableName, true))
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (a *SQLClient) CreateResultsTableIfNotExists(tableName string) error {
-	panic("SQLClient GetTableInfo")
+	_, err := a.Exec(query.CreateResultsTable(tableName, true))
+	if err != nil {
+		return err
+	}
+	return nil
 }

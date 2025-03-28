@@ -23,7 +23,7 @@ var (
 var logger = util.GetLogger()
 
 var CopyCmd = &cobra.Command{
-	Use:   "cp <tablenames>...",
+	Use:   "cp <table names>...",
 	Short: "Copy given results tables from source to destination",
 	Long:  "...",
 	Args:  copyIrisArgs,
