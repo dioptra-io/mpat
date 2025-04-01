@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	v1 "github.com/dioptra-io/ufuk-research/api/v1"
+	"github.com/dioptra-io/ufuk-research/internal/compute"
 	"github.com/dioptra-io/ufuk-research/internal/cp"
 	"github.com/dioptra-io/ufuk-research/pkg/util"
 )
@@ -60,21 +60,12 @@ func main() {
 			fmt.Printf("git commit: %s\n", GitCommit)
 			fmt.Printf("build date: %s\n", BuildDate)
 			fmt.Printf("go version: %s\n", GoVersion)
-
-			info := v1.ResultsTableInfo{
-				TableName:   "cwdcwdecw",
-				NumRows:     0,
-				Exists:      false,
-				NumBytes:    0,
-				ColumnNames: []string{},
-			}
-
-			logger.Infof("test: %v\n", info)
 		},
 	}
 
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(cp.CpCmd())
+	rootCmd.AddCommand(compute.ComputeCmd())
 
 	// Add the silent and debug flag
 	rootCmd.PersistentFlags().Bool("debug", false, "see debug messages")

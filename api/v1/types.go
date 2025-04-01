@@ -1,13 +1,9 @@
 package v1
 
-// import (
-// 	"fmt"
-// 	"net"
-// 	"time"
-//
-// 	"github.com/dioptra-io/ufuk-research/pkg/config"
-// 	"github.com/dioptra-io/ufuk-research/pkg/util"
-// )
+import (
+	"errors"
+	"strings"
+)
 
 type ResultsTableInfo struct {
 	TableName   string
@@ -15,6 +11,62 @@ type ResultsTableInfo struct {
 	NumRows     uint64
 	NumBytes    uint64
 	ColumnNames []string
+}
+
+// There is a convention of the table names, this package manages them.
+// Iris Results Table: results__<uuid with underscore>__<uuid with underscore>
+// Iris Routes Table:  routes__<uuid with underscore>__<uuid with underscore>
+// Ark Results Table:  ark_results__cycle<yearmonthdate>
+// Ark Routes Table:   ark_routes__cycle<yearmonthdate>
+
+var ErrUnknownType = errors.New("given type is an unknown table type")
+
+type (
+	TableType     string // currently results or routes
+	TablePlatform string // currently ark or iris
+	TableName     string // name of the table
+)
+
+const (
+	UnknownTable TableType = "unknown"
+	ResultsTable TableType = "results"
+	RoutesTable  TableType = "routes"
+)
+
+const (
+	UnknownPlatform TablePlatform = "unknown"
+	IrisPlatform    TablePlatform = "iris"
+	ArkPlatform     TablePlatform = "ark"
+)
+
+func (t TableName) Type() TableType {
+	name := string(t)
+	if strings.HasPrefix(name, "results__") {
+		return ResultsTable
+	} else if strings.HasPrefix(name, "routes__") {
+		return RoutesTable
+	}
+	return UnknownTable
+}
+
+func (t TableName) Platform() TablePlatform {
+	name := string(t)
+	if strings.HasPrefix(name, "ark_") {
+		return ArkPlatform
+	} else if len(strings.Split(name, "__")) == 3 { // iris tables does not start with iris
+		return IrisPlatform
+	}
+	return UnknownPlatform
+}
+
+func (t TableName) Convert(to TableType) (TableName, error) {
+	name := string(t)
+	switch t.Type() {
+	case ResultsTable, RoutesTable:
+		return TableName(strings.Replace(name, string(t.Type()), string(to), 1)), nil
+	default:
+		return "", ErrUnknownType
+	}
 }
 
 // LOL
