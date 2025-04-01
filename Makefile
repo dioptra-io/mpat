@@ -5,6 +5,7 @@ GIT_COMMIT := $(shell git rev-parse --short HEAD)
 BUILD_DATE := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 GO_VERSION := $(shell go version | awk '{print $$3}')
 GO_BIN := $(shell go env GOPATH)/bin
+SHELL_NAME := $(shell basename $$SHELL)
 
 help: ## Display this help message
 	@echo "Makefile for MPAT (Measurement Platform Analysis Tool), the targets are listed below:\\n"
@@ -23,6 +24,11 @@ build: ## Compile the executable under build/mpat
 
 install: build ## Copy the binary into $GOPATH/bin foler.
 	install ./build/mpat "$(GO_BIN)"
+
+	@echo "\nTo enable shell completions:"
+	@printf "\033[36msource <(mpat completion $(SHELL_NAME))\033[0m\n"
+	@echo ""
+
 
 test: ## Run go test for all of the packages
 	go test ./...
