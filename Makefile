@@ -22,7 +22,7 @@ build: ## Compile the executable under build/mpat
 		-o build/mpat cmd/mpat/main.go
 
 install: build ## Copy the binary into $GOPATH/bin foler.
-	install ./build/mpat "$(GO_BIN)/bin"
+	install ./build/mpat "$(GO_BIN)"
 
 test: ## Run go test for all of the packages
 	go test ./...
