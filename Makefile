@@ -4,6 +4,7 @@ VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 GIT_COMMIT := $(shell git rev-parse --short HEAD)
 BUILD_DATE := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 GO_VERSION := $(shell go version | awk '{print $$3}')
+GO_BIN := $(shell go env GOPATH)/bin
 
 help: ## Display this help message
 	@echo "Makefile for MPAT (Measurement Platform Analysis Tool), the targets are listed below:\\n"
@@ -21,7 +22,7 @@ build: ## Compile the executable under build/mpat
 		-o build/mpat cmd/mpat/main.go
 
 install: build ## Copy the binary into $GOPATH/bin foler.
-	install ./build/mpat "$(go env GOPATH)/bin"
+	install ./build/mpat "$(GO_BIN)/bin"
 
 test: ## Run go test for all of the packages
 	go test ./...
