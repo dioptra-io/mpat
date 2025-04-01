@@ -1,4 +1,4 @@
-.PHONY: count-go-lines count-total-go-lines test build help check-build check-vet check-all
+.PHONY: count-go-lines count-total-go-lines test build help check-build check-vet check-all install
 
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 GIT_COMMIT := $(shell git rev-parse --short HEAD)
@@ -19,6 +19,9 @@ build: ## Compile the executable under build/mpat
 		-X main.BuildDate=$(BUILD_DATE) \
 		-X main.GoVersion=$(GO_VERSION)" \
 		-o build/mpat cmd/mpat/main.go
+
+install: build ## Copy the binary into $GOPATH/bin foler.
+	install ./build/mpat "$(go env GOPATH)/bin"
 
 test: ## Run go test for all of the packages
 	go test ./...
