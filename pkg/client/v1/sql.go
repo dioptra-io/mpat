@@ -12,7 +12,7 @@ import (
 
 	_ "github.com/ClickHouse/clickhouse-go/v2"
 
-	v1 "github.com/dioptra-io/ufuk-research/api/v1"
+	apiv1 "github.com/dioptra-io/ufuk-research/api/v1"
 	"github.com/dioptra-io/ufuk-research/pkg/query"
 )
 
@@ -158,7 +158,7 @@ func (a *SQLClient) HealthCheck() error {
 	return nil
 }
 
-func (a *SQLClient) GetTableInfoFromTableName(tablesToCheck []v1.TableName) ([]v1.ResultsTableInfo, error) {
+func (a *SQLClient) GetTableInfoFromTableName(tablesToCheck []apiv1.TableName) ([]apiv1.ResultsTableInfo, error) {
 	tableNames := make([]string, 0, len(tablesToCheck))
 	for i := 0; i < len(tablesToCheck); i++ {
 		tableNames = append(tableNames, string(tablesToCheck[i]))
@@ -166,7 +166,7 @@ func (a *SQLClient) GetTableInfoFromTableName(tablesToCheck []v1.TableName) ([]v
 	return a.GetTableInfo(tableNames)
 }
 
-func (a *SQLClient) GetTableInfo(tablesToCheck []string) ([]v1.ResultsTableInfo, error) {
+func (a *SQLClient) GetTableInfo(tablesToCheck []string) ([]apiv1.ResultsTableInfo, error) {
 	// for i, tableName := range tablesToCheck { // this can be optimized bu one query
 	// 	info := v1.ResultsTableInfo{
 	// 		TableName:   tableName,
@@ -185,10 +185,10 @@ func (a *SQLClient) GetTableInfo(tablesToCheck []string) ([]v1.ResultsTableInfo,
 	//
 	// 	infoToReturn[i] = info
 	// }
-	infoToReturn := make([]v1.ResultsTableInfo, len(tablesToCheck))
+	infoToReturn := make([]apiv1.ResultsTableInfo, len(tablesToCheck))
 
 	for i, tableName := range tablesToCheck { // this can be optimized bu one query
-		info := v1.ResultsTableInfo{
+		info := apiv1.ResultsTableInfo{
 			TableName:   tableName,
 			Exists:      false, // start with exists false
 			NumRows:     0,
@@ -264,5 +264,10 @@ func (a *SQLClient) CreateRoutesTableIfNotExists(tableName string) error {
 	if err != nil {
 		return err
 	}
+	return nil
+}
+
+func (a *SQLClient) UploadRouteInfos(routeInfos apiv1.ResultsTableInfo) error {
+	panic("not implemented")
 	return nil
 }

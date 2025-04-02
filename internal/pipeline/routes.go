@@ -249,15 +249,28 @@ func (p *RoutesPipeline) runRouteTraceToRouteInfoProcessor(ctx context.Context, 
 }
 
 func (p *RoutesPipeline) runRouteInfoToChunkUploadInfoProcessor(ctx context.Context, inCh <-chan apiv1.RouteInfo, outch chan<- ChunkUploadInfo) error {
+	routeInfoBuffer := make([]apiv1.RouteInfo, 0, p.cfg.UploadChunkSize)
+
 	for routeInfo := range inCh {
 		if ok := process.ContextValid(ctx); !ok {
 			return nil
 		}
-		logger.Debugf("routeInfo: %v\n", routeInfo)
+		// Chunk and upload
+		if len(routeInfoBuffer) == p.cfg.UploadChunkSize { // time to ship
+			if err := p.sourceClient.UploadRouteInfos(routeInfoBuffer); err != nil {
+				return err
+			}
+			routeInfoBuffer = routeInfoBuffer[:0] // reset the slice while keeping capacity
+		}
 
 		if ok := process.Push(ctx, outch, p.errCh, ChunkUploadInfo{}); !ok {
 			return nil
 		}
+	}
+
+	// Upload remeaning chunk
+	if err := p.sourceClient.UploadRouteInfos(routeInfoBuffer); err != nil {
+		return err
 	}
 	return nil
 }
