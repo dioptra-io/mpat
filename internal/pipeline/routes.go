@@ -16,17 +16,17 @@ import (
 var ErrGivenTablesAreNotRoute = errors.New("given tables are not route tables")
 
 type RouteTraceInfo struct {
-	TableName *apiv1.TableName
+	TableName apiv1.TableName
 	Data      *apiv1.RouteTrace
 }
 
 type RouteInfo struct {
-	TableName *apiv1.TableName
+	TableName apiv1.TableName
 	Data      []*apiv1.RouteHop
 }
 
 type ChunkUploadInfo struct {
-	TableName *apiv1.TableName
+	TableName apiv1.TableName
 	NumRows   int
 }
 
@@ -181,7 +181,7 @@ func (p *RoutesPipeline) runTableNameToRouteTraceProcessor(ctx context.Context, 
 
 			routeTraceInfo := RouteTraceInfo{
 				Data:      &routeTrace,
-				TableName: &tableName,
+				TableName: tableName,
 			}
 
 			if ok := process.Push(ctx, outch, p.errCh, routeTraceInfo); !ok {
@@ -258,9 +258,9 @@ func (p *RoutesPipeline) runRouteTraceToRouteInfoProcessor(ctx context.Context, 
 			}
 		}
 
-		tableName := apiv1.TableName("")
+		tableName := routeTraceInfo.TableName
 		routeInfo := RouteInfo{
-			TableName: &tableName,
+			TableName: tableName,
 			Data:      routeHops,
 		}
 
@@ -281,24 +281,27 @@ func (p *RoutesPipeline) runRouteInfoToChunkUploadInfoProcessor(ctx context.Cont
 		if ok := process.ContextValid(ctx); !ok {
 			return nil
 		}
+
 		// Chunk and upload
-		if len(routeInfoBuffer[*routeInfo.TableName]) == p.cfg.UploadChunkSize { // time to ship
-			if err := p.sourceClient.UploadRouteInfos(string(*routeInfo.TableName), routeInfoBuffer[*routeInfo.TableName]); err != nil {
+		if len(routeInfoBuffer[routeInfo.TableName]) < p.cfg.UploadChunkSize { // not time to ship
+			routeInfoBuffer[routeInfo.TableName] = append(routeInfoBuffer[routeInfo.TableName], routeInfo.Data...)
+		} else {
+			numRowsUploaded := len(routeInfoBuffer[routeInfo.TableName])
+			if err := p.sourceClient.UploadRouteInfos(string(routeInfo.TableName), routeInfoBuffer[routeInfo.TableName]); err != nil {
 				return err
 			}
-			routeInfoBuffer[*routeInfo.TableName] = routeInfoBuffer[*routeInfo.TableName][:0] // reset the slice while keeping capacity
-		} else {
-			routeInfoBuffer[*routeInfo.TableName] = append(routeInfoBuffer[*routeInfo.TableName], routeInfo.Data...)
+			routeInfoBuffer[routeInfo.TableName] = routeInfoBuffer[routeInfo.TableName][:0] // reset the slice while keeping capacity
+
+			chunkUploadInfo := ChunkUploadInfo{
+				TableName: routeInfo.TableName,
+				NumRows:   numRowsUploaded,
+			}
+
+			if ok := process.Push(ctx, outch, p.errCh, chunkUploadInfo); !ok {
+				return nil
+			}
 		}
 
-		chunkUploadInfo := ChunkUploadInfo{
-			TableName: routeInfo.TableName,
-			NumRows:   p.cfg.UploadChunkSize,
-		}
-
-		if ok := process.Push(ctx, outch, p.errCh, chunkUploadInfo); !ok {
-			return nil
-		}
 	}
 
 	// Upload the remeaning chunks
@@ -313,7 +316,7 @@ func (p *RoutesPipeline) runRouteInfoToChunkUploadInfoProcessor(ctx context.Cont
 		}
 
 		chunkUploadInfo := ChunkUploadInfo{
-			TableName: &tableName,
+			TableName: tableName,
 			NumRows:   remeaningRows,
 		}
 

@@ -261,8 +261,7 @@ func (a *SQLClient) UploadRouteInfos(tableName string, routeInfos []*apiv1.Route
 	}
 	defer stmt.Close()
 
-	for i := 0; i < len(routeInfos); i++ {
-		record := routeInfos[i]
+	for _, record := range routeInfos {
 		if _, err := stmt.Exec(
 			record.IPAddr,
 			record.NextAddr,

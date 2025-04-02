@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -18,12 +19,15 @@ import (
 
 // flags
 var (
-	fSourceDSN             string
-	fMaxNumWorkers         int
+	fSourceDSN string
+
+	fNumWorkers            int
 	fMaxRowUploadRate      int
 	fForceResetDestination bool
 	fInputFile             string
 	fMaxRetries            int
+	fSkipDuplicateIPs      bool
+	fUploadChunkSize       int
 )
 
 var (
@@ -46,6 +50,9 @@ func ComputeCmd() *cobra.Command {
 	computeCmd.PersistentFlags().StringVar(&fInputFile, "input-file", "", "file to read the table names")
 	computeCmd.PersistentFlags().IntVarP(&fMaxRowUploadRate, "max-row-upload-rate", "r", config.DefaultMaxRowUploadRate, "limit the number of rows to upload per second")
 	computeCmd.PersistentFlags().IntVar(&fMaxRetries, "max-retries", config.DefaultMaxRetries, "number of retries if a downlaod or upload fails")
+	computeCmd.PersistentFlags().BoolVar(&fSkipDuplicateIPs, "skip-duplicate-ips", config.DefaultSkipDuplicateIPs, "perform group uniq array for route trace computation")
+	computeCmd.PersistentFlags().IntVar(&fUploadChunkSize, "upload-chunk-size", config.DefaultUploadChunkSize, "chunk size for uploading")
+	computeCmd.PersistentFlags().IntVar(&fNumWorkers, "num-workers", config.DefaultNumWorkers, "number of parallel workers and uploaders")
 
 	computeRoutesCmd := &cobra.Command{
 		Use:   "routes <table names>...",
@@ -192,11 +199,12 @@ func computeRoutesCmd(cmd *cobra.Command, args []string) {
 	}
 
 	routesPipeline, err := pipeline.NewRoutesPipeline(sourceClient, routesTables, pipeline.RoutesPipelineConfig{
-		NumWorkers:      2,
-		NumUploaders:    1,
-		NumMaxRetries:   3,
-		MaxUploadRate:   0,
-		UploadChunkSize: 10000,
+		NumWorkers:       fNumWorkers,
+		NumUploaders:     fNumWorkers,
+		NumMaxRetries:    3,
+		MaxUploadRate:    0,
+		UploadChunkSize:  fUploadChunkSize,
+		SkipDuplicateIPs: fSkipDuplicateIPs,
 	})
 	if err != nil {
 		logger.Fatalf("Error occured while creating the routes pipeline: %v.\n", err)
@@ -211,8 +219,12 @@ func computeRoutesCmd(cmd *cobra.Command, args []string) {
 
 	logger.Debugln("Started pipeline")
 
+	startTime := time.Now()
+	processedNumChunks := 0
 	for processedChunks := range routesPipeline.OutCh() {
-		logger.Debugf("zort: %v", processedChunks)
+		processedNumChunks++
+		elapsed := time.Since(startTime).Truncate(time.Second)
+		logger.Infof("Processed chunk [processed=%d elapsed=%v size=%d] for table %v", processedNumChunks, elapsed, processedChunks.NumRows, processedChunks.TableName)
 	}
 
 	done := false
@@ -228,48 +240,8 @@ func computeRoutesCmd(cmd *cobra.Command, args []string) {
 	}
 
 	if numPipelineFails != 0 {
-		logger.Infof("Failed to copy for %d table(s) with %d error(s).\n", numTablesToCopy, numPipelineFails)
+		logger.Infof("Failed to compute routes for %d table(s) with %d error(s).\n", numTablesToCopy, numPipelineFails)
 	} else {
-		logger.Infof("Finished copying for %d table(s).\n", numTablesToCopy)
+		logger.Infof("Finished computing routes for %d table(s).\n", numTablesToCopy)
 	}
-
-	// pipeline, errCh, err := pipeline.NewRoutesPipeline(sourceClient)
-	// // create and start pipeline
-	// pipeline, errCh, err := pipeline.NewCopyPipeline(sourceClient, destinationClient, resultTablesToCopy, fParallelDownloads, fChunkSize, fMaxRowUploadRate, fMaxRetries)
-	// if err != nil {
-	// 	logger.Fatalf("Error while preaparing the copy pipeline: %v.\n", err)
-	// 	return
-	// }
-	// defer pipeline.Close() // close the pipeline after
-	//
-	// pipeline.Start(context.Background())
-	//
-	// startTime := time.Now()
-	//
-	// processedNumChunks := 0
-	// for processedChunks := range pipeline.Output() {
-	// 	processedNumChunks++
-	// 	percent := 100 * float64(processedNumChunks) / float64(totalNumberOfChunks)
-	// 	elapsed := time.Since(startTime).Truncate(time.Second)
-	// 	eta := ((elapsed / time.Duration(processedNumChunks)) * time.Duration(totalNumberOfChunks-processedNumChunks)).Truncate(time.Second)
-	// 	logger.Infof("Processed [%.2f%%, elapsed=%v, eta=%v] chunk %d / %d for table %s.\n", percent, elapsed, eta, processedNumChunks, totalNumberOfChunks, processedChunks.Info.TableName)
-	// }
-	//
-	// done := false
-	// numPipelineFails := 0
-	// for !done {
-	// 	select {
-	// 	case err := <-errCh:
-	// 		logger.Fatalf("Pipeline failed with error: %v.\n", err)
-	// 		numPipelineFails++
-	// 	default:
-	// 		done = true
-	// 	}
-	// }
-	//
-	// if numPipelineFails != 0 {
-	// 	logger.Infof("Failed to copy for %d table(s) with %d error(s).\n", numTablesToCopy, numPipelineFails)
-	// } else {
-	// 	logger.Infof("Finished copying for %d table(s).\n", numTablesToCopy)
-	// }
 }
