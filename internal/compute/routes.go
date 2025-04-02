@@ -2,6 +2,7 @@ package compute
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"os"
 	"slices"
@@ -9,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	apiv1 "github.com/dioptra-io/ufuk-research/api/v1"
+	"github.com/dioptra-io/ufuk-research/internal/pipeline"
 	clientv1 "github.com/dioptra-io/ufuk-research/pkg/client/v1"
 	"github.com/dioptra-io/ufuk-research/pkg/config"
 	"github.com/dioptra-io/ufuk-research/pkg/util"
@@ -131,12 +133,12 @@ func computeRoutesCmd(cmd *cobra.Command, args []string) {
 	logger.Infoln("Database healthcheck is successful.")
 
 	// check if the given table names all exist on source.
-	resultsTableInfos, err := sourceClient.GetTableInfo(inputTableNames)
+	resultsTableInfos, err := sourceClient.GetTableInfoFromTableName(resultsTables)
 	if err != nil {
 		logger.Fatalf("Error while checking source table info: %v.\n", err)
 	}
 
-	routesTableInfos, err := sourceClient.GetTableInfo(inputTableNames)
+	routesTableInfos, err := sourceClient.GetTableInfoFromTableName(routesTables)
 	if err != nil {
 		logger.Fatalf("Error while checking destination table info: %v.\n", err)
 	}
@@ -156,7 +158,7 @@ func computeRoutesCmd(cmd *cobra.Command, args []string) {
 		resultsTableInfo := resultsTableInfos[i]
 		routesTableInfo := routesTableInfos[i]
 
-		logger.Debugf("here dst.exists=%v, dst.count=%d, src.count=%d, force=%v.\n", routesTableInfo.Exists, routesTableInfo.NumRows, resultsTableInfo.NumRows, fForceResetDestination)
+		logger.Debugf("resutls.exists=%v, results.count=%d, routes.exists=%v, force=%v.\n", resultsTableInfo.Exists, resultsTableInfo.NumRows, routesTableInfo.Exists, fForceResetDestination)
 
 		// criteria for recomputation, not exsits or forced or size 0
 		if !routesTableInfo.Exists || fForceResetDestination || routesTableInfo.NumRows == 0 {
@@ -170,7 +172,7 @@ func computeRoutesCmd(cmd *cobra.Command, args []string) {
 					logger.Fatalf("Cannot reset routes table: %v.\n", err)
 					return
 				}
-				if err := sourceClient.CreateResultsTableIfNotExists(routesTableInfo.TableName); err != nil {
+				if err := sourceClient.CreateRoutesTableIfNotExists(routesTableInfo.TableName); err != nil {
 					logger.Fatalf("Cannot reset routes table: %v.\n", err)
 					return
 				}
@@ -187,6 +189,48 @@ func computeRoutesCmd(cmd *cobra.Command, args []string) {
 		return
 	} else {
 		logger.Infof("Validated %d tables(s), %d of them will be processed.\n", len(inputTableNames), numTablesToCopy)
+	}
+
+	routesPipeline, err := pipeline.NewRoutesPipeline(sourceClient, routesTables, pipeline.RoutesPipelineConfig{
+		NumWorkers:      2,
+		NumUploaders:    1,
+		NumMaxRetries:   3,
+		MaxUploadRate:   0,
+		UploadChunkSize: 10000,
+	})
+	if err != nil {
+		logger.Fatalf("Error occured while creating the routes pipeline: %v.\n", err)
+		return
+	}
+	defer routesPipeline.Close()
+
+	if err := routesPipeline.Start(context.Background()); err != nil {
+		logger.Fatalf("Error occured while starting the routes pipeline: %v.\n", err)
+		return
+	}
+
+	logger.Debugln("Started pipeline")
+
+	for processedChunks := range routesPipeline.OutCh() {
+		logger.Debugf("zort: %v", processedChunks)
+	}
+
+	done := false
+	numPipelineFails := 0
+	for !done {
+		select {
+		case err := <-routesPipeline.ErrCh():
+			logger.Fatalf("Pipeline failed with error: %v.\n", err)
+			numPipelineFails++
+		default:
+			done = true
+		}
+	}
+
+	if numPipelineFails != 0 {
+		logger.Infof("Failed to copy for %d table(s) with %d error(s).\n", numTablesToCopy, numPipelineFails)
+	} else {
+		logger.Infof("Finished copying for %d table(s).\n", numTablesToCopy)
 	}
 
 	// pipeline, errCh, err := pipeline.NewRoutesPipeline(sourceClient)

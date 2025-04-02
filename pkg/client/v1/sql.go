@@ -158,6 +158,14 @@ func (a *SQLClient) HealthCheck() error {
 	return nil
 }
 
+func (a *SQLClient) GetTableInfoFromTableName(tablesToCheck []v1.TableName) ([]v1.ResultsTableInfo, error) {
+	tableNames := make([]string, 0, len(tablesToCheck))
+	for i := 0; i < len(tablesToCheck); i++ {
+		tableNames = append(tableNames, string(tablesToCheck[i]))
+	}
+	return a.GetTableInfo(tableNames)
+}
+
 func (a *SQLClient) GetTableInfo(tablesToCheck []string) ([]v1.ResultsTableInfo, error) {
 	// for i, tableName := range tablesToCheck { // this can be optimized bu one query
 	// 	info := v1.ResultsTableInfo{
@@ -221,11 +229,6 @@ func (a *SQLClient) GetTableInfo(tablesToCheck []string) ([]v1.ResultsTableInfo,
 		infoToReturn[current].NumRows = scannedNumRows
 		infoToReturn[current].NumBytes = scannedNumBytes
 
-		// if a.database == "iris" {
-		// 	fmt.Printf("IRIS: %v\n", infoToReturn[current])
-		// } else {
-		// 	fmt.Printf("RESEARCH: %v\n", infoToReturn[current])
-		// }
 		current++
 	}
 
@@ -250,6 +253,14 @@ func (a *SQLClient) TruncateTableIfNotExists(tableName string) error {
 
 func (a *SQLClient) CreateResultsTableIfNotExists(tableName string) error {
 	_, err := a.Exec(query.CreateResultsTable(tableName, true))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *SQLClient) CreateRoutesTableIfNotExists(tableName string) error {
+	_, err := a.Exec(query.CreateRoutesTable(tableName, true))
 	if err != nil {
 		return err
 	}

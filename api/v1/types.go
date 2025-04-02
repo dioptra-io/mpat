@@ -1,8 +1,11 @@
 package v1
 
 import (
+	"database/sql"
 	"errors"
+	"net"
 	"strings"
+	"time"
 )
 
 type ResultsTableInfo struct {
@@ -67,6 +70,77 @@ func (t TableName) Convert(to TableType) (TableName, error) {
 	default:
 		return "", ErrUnknownType
 	}
+}
+
+// This representes the returning row of a route trace
+type RouteTrace struct {
+	ProbeDstAddr             net.IP      `json:"probe_dst_addr"`
+	ProbeSrcAddr             net.IP      `json:"probe_src_addr"`
+	ProbeDstPort             uint16      `json:"probe_dst_port"`
+	ProbeSrcPort             uint16      `json:"probe_src_port"`
+	ProbeProtocol            uint8       `json:"probe_protocol"`
+	ProbeTTLs                []uint8     `json:"probe_ttls"`                 // groupArray of probe_ttl
+	CaptureTimestamps        []time.Time `json:"capture_timestamps"`         // groupArray of capture_timestamp
+	ReplySrcAddrs            []net.IP    `json:"reply_src_addrs"`            // groupArray of reply_src_addr
+	DestinationHostReplies   []uint8     `json:"destination_host_replies"`   // groupArray of destination_host_reply
+	DestinationPrefixReplies []uint8     `json:"destination_prefix_replies"` // groupArray of destination_prefix_reply
+	ReplyICMPTypes           []uint8     `json:"reply_icmp_types"`           // groupArray of reply_icmp_type
+	ReplyICMPCodes           []uint8     `json:"reply_icmp_codes"`           // groupArray of reply_icmp_code
+	ReplySizes               []uint16    `json:"reply_sizes"`                // groupArray of reply_size
+	RTTs                     []uint16    `json:"rtts"`                       // groupArray of rtt
+	TimeExceededReplies      []uint8     `json:"time_exceeded_replies"`      // groupArray of time_exceeded_reply
+}
+
+func (r *RouteTrace) Scan(rows *sql.Rows) error {
+	if err := rows.Scan(
+		&r.ProbeDstAddr,
+		&r.ProbeSrcAddr,
+		&r.ProbeDstPort,
+		&r.ProbeSrcPort,
+		&r.ProbeProtocol,
+		&r.ProbeTTLs,
+		&r.CaptureTimestamps,
+		&r.ReplySrcAddrs,
+		&r.DestinationHostReplies,
+		&r.DestinationPrefixReplies,
+		&r.ReplyICMPTypes,
+		&r.ReplyICMPCodes,
+		&r.ReplySizes,
+		&r.RTTs,
+		&r.TimeExceededReplies,
+	); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *RouteTrace) Length() int {
+	return len(r.ProbeTTLs)
+}
+
+type RouteInfo struct {
+	// Most important data.
+	IPAddr   net.IP
+	NextAddr net.IP
+
+	// Additionalt metadata.
+	FirstCaptureTimestamp time.Time
+
+	// Flowid
+	ProbeSrcAddr  net.IP
+	ProbeDstAddr  net.IP
+	ProbeSrcPort  uint16
+	ProbeDstPort  uint16
+	ProbeProtocol uint8
+
+	// These are the other info might me useful with the next hop row
+	IsDestinationHostReply   uint8
+	IsDestinationPrefixReply uint8
+	ReplyICMPType            uint8
+	ReplyICMPCode            uint8
+	ReplySize                uint16
+	RTT                      uint16
+	TimeExceededReply        uint8
 }
 
 // LOL

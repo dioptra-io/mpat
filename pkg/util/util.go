@@ -3,6 +3,7 @@ package util
 import (
 	"fmt"
 	"math"
+	"net"
 	"strings"
 	"time"
 )
@@ -84,4 +85,13 @@ func ExponentialBackoff(i int, maxCap time.Duration) time.Duration {
 		return maxCap
 	}
 	return time.Duration(backoff)
+}
+
+func ContainsIP(addresses []net.IP, addr net.IP) bool {
+	for _, ip := range addresses {
+		if addr.Equal(ip) {
+			return true
+		}
+	}
+	return false
 }

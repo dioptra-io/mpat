@@ -2,7 +2,6 @@ package query
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/dioptra-io/ufuk-research/pkg/util"
@@ -154,7 +153,8 @@ CREATE TABLE %s %s (
     reply_size              UInt16,
     rtt                     UInt16,
     time_exceeded_reply     UInt8,
-    probe_dst_prefix        IPv6 MATERIALIZED toIPv6(cutIPv6(probe_dst_addr, 8, 1))
+    probe_dst_prefix        IPv6 MATERIALIZED toIPv6(cutIPv6(probe_dst_addr, 8, 1)),
+    INDEX ip_prefix_lookup (ip_addr, probe_dst_prefix) TYPE set(1000) GRANULARITY 1
 ) ENGINE = MergeTree ()
 ORDER BY (probe_protocol, probe_src_addr, probe_dst_prefix, probe_dst_addr, probe_src_port, probe_dst_port, ip_addr, first_capture_timestamp, next_addr);
 `
@@ -208,7 +208,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
 	return fmt.Sprintf(formatString, tableName)
 }
 
-func SelectRoutes(tableNames []string) string {
+func SelectRoutes(tableName string) string {
 	formatString := `
 SELECT
     probe_dst_addr,
@@ -219,7 +219,6 @@ SELECT
     groupArray(probe_ttl) as probe_ttls,
     groupArray(capture_timestamp) as capture_timestamps,
     groupArray(reply_src_addr) as reply_src_addrs,
-    -- These are the other data useful for later
     groupArray(destination_host_reply) as destination_host_replies,
     groupArray(destination_prefix_reply) as destination_prefix_replies,
     groupArray(reply_icmp_type) as reply_icmp_types,
@@ -244,11 +243,7 @@ ORDER BY
     probe_src_port, 
     probe_dst_port
 `
-	escapedTableNames := make([]string, 0)
-	for _, tableName := range tableNames {
-		escapedTableNames = append(escapedTableNames, regexp.QuoteMeta(tableName))
-	}
-	return fmt.Sprintf(formatString, strings.Join(escapedTableNames, "|"))
+	return fmt.Sprintf(formatString, tableName)
 }
 
 func Select1() string {
