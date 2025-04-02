@@ -1,4 +1,4 @@
-.PHONY: count-go-lines count-total-go-lines test build help check-build check-vet check-all install
+.PHONY: count-go-lines test build help check-build check-vet check-all install
 
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 GIT_COMMIT := $(shell git rev-parse --short HEAD)
@@ -46,9 +46,6 @@ clean: ## Run go clean command, also removes the mod cache
 
 count-go-lines: ## Return the number of lines for each go file
 	@find . -name "*.go" -exec wc -l {} +
-
-count-total-go-lines: ## Return the total number of lines written in go
-	@make count-go-lines | grep -e total | awk '{print $$1}'
 
 version: ## Get the version the binary will be compiled to
 	@echo $(VERSION)
