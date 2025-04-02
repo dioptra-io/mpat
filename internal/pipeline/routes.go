@@ -15,8 +15,19 @@ import (
 
 var ErrGivenTablesAreNotRoute = errors.New("given tables are not route tables")
 
+type RouteTraceInfo struct {
+	TableName *apiv1.TableName
+	Data      *apiv1.RouteTrace
+}
+
+type RouteInfo struct {
+	TableName *apiv1.TableName
+	Data      []*apiv1.RouteHop
+}
+
 type ChunkUploadInfo struct {
-	NumRows int
+	TableName *apiv1.TableName
+	NumRows   int
 }
 
 type RoutesPipeline struct {
@@ -26,13 +37,13 @@ type RoutesPipeline struct {
 	errCh chan error
 
 	tableNameCh       chan apiv1.TableName
-	routeTraceCh      chan apiv1.RouteTrace
-	routeInfoCh       chan apiv1.RouteInfo
+	routeTraceCh      chan RouteTraceInfo
+	routeInfoCh       chan RouteInfo
 	chunkUploadInfoCh chan ChunkUploadInfo
 
-	tableNameToRouteTraceProcessor      *process.LinearProcess[apiv1.TableName, apiv1.RouteTrace]
-	routeTraceToRouteInfoProcessor      *process.LinearProcess[apiv1.RouteTrace, apiv1.RouteInfo]
-	routeInfoToChunkUploadInfoProcessor *process.LinearProcess[apiv1.RouteInfo, ChunkUploadInfo]
+	tableNameToRouteTraceProcessor      *process.LinearProcess[apiv1.TableName, RouteTraceInfo]
+	routeTraceToRouteInfoProcessor      *process.LinearProcess[RouteTraceInfo, RouteInfo]
+	routeInfoToChunkUploadInfoProcessor *process.LinearProcess[RouteInfo, ChunkUploadInfo]
 }
 
 type RoutesPipelineConfig struct {
@@ -60,26 +71,26 @@ func NewRoutesPipeline(sourceClient *clientv1.SQLClient, RouteTableNames []apiv1
 	// Create channels
 	errCh := make(chan error, cfg.NumWorkers*2) // make sure to consume this to prevent blocking
 	tableNameCh := process.SliceToChannel(RouteTableNames)
-	routeTraceCh := make(chan apiv1.RouteTrace, cfg.NumWorkers)
-	routeInfoCh := make(chan apiv1.RouteInfo, cfg.NumWorkers)
+	routeTraceCh := make(chan RouteTraceInfo, cfg.NumWorkers)
+	routeInfoCh := make(chan RouteInfo, cfg.NumWorkers)
 	chunkUploadInfoCh := make(chan ChunkUploadInfo, cfg.NumWorkers)
 
 	close(tableNameCh)
 
 	// Create processors
-	tableNameToRouteTraceProcessor := &process.LinearProcess[apiv1.TableName, apiv1.RouteTrace]{
+	tableNameToRouteTraceProcessor := &process.LinearProcess[apiv1.TableName, RouteTraceInfo]{
 		InCh:       tableNameCh,
 		OutCh:      routeTraceCh,
 		ErrCh:      errCh,
 		NumWorkers: 1, // to consume one table at a time
 	}
-	routeTraceToRouteInfoProcessor := &process.LinearProcess[apiv1.RouteTrace, apiv1.RouteInfo]{
+	routeTraceToRouteInfoProcessor := &process.LinearProcess[RouteTraceInfo, RouteInfo]{
 		InCh:       routeTraceCh,
 		OutCh:      routeInfoCh,
 		ErrCh:      errCh,
 		NumWorkers: cfg.NumWorkers,
 	}
-	routeInfoToChunkUploadInfoProcessor := &process.LinearProcess[apiv1.RouteInfo, ChunkUploadInfo]{
+	routeInfoToChunkUploadInfoProcessor := &process.LinearProcess[RouteInfo, ChunkUploadInfo]{
 		InCh:       routeInfoCh,
 		OutCh:      chunkUploadInfoCh,
 		ErrCh:      errCh,
@@ -136,7 +147,7 @@ func (p *RoutesPipeline) OutCh() <-chan ChunkUploadInfo {
 	return p.chunkUploadInfoCh
 }
 
-func (p *RoutesPipeline) runTableNameToRouteTraceProcessor(ctx context.Context, inCh <-chan apiv1.TableName, outch chan<- apiv1.RouteTrace) error {
+func (p *RoutesPipeline) runTableNameToRouteTraceProcessor(ctx context.Context, inCh <-chan apiv1.TableName, outch chan<- RouteTraceInfo) error {
 	for tableName := range inCh {
 		if ok := process.ContextValid(ctx); !ok {
 			return nil
@@ -168,7 +179,12 @@ func (p *RoutesPipeline) runTableNameToRouteTraceProcessor(ctx context.Context, 
 				return err
 			}
 
-			if ok := process.Push(ctx, outch, p.errCh, routeTrace); !ok {
+			routeTraceInfo := RouteTraceInfo{
+				Data:      &routeTrace,
+				TableName: &tableName,
+			}
+
+			if ok := process.Push(ctx, outch, p.errCh, routeTraceInfo); !ok {
 				rows.Close()
 				return nil
 			}
@@ -178,16 +194,18 @@ func (p *RoutesPipeline) runTableNameToRouteTraceProcessor(ctx context.Context, 
 	return nil
 }
 
-func (p *RoutesPipeline) runRouteTraceToRouteInfoProcessor(ctx context.Context, inCh <-chan apiv1.RouteTrace, outch chan<- apiv1.RouteInfo) error {
-	for routeTrace := range inCh {
+func (p *RoutesPipeline) runRouteTraceToRouteInfoProcessor(ctx context.Context, inCh <-chan RouteTraceInfo, outch chan<- RouteInfo) error {
+	for routeTraceInfo := range inCh {
 		if ok := process.ContextValid(ctx); !ok {
 			return nil
 		}
+		routeTrace := routeTraceInfo.Data
 
 		// perform the matching algorithm
 		minTTL, maxTTL := slices.Min(routeTrace.ProbeTTLs), slices.Max(routeTrace.ProbeTTLs)
 		ttlIndexMap := make(map[uint8][]int, maxTTL-minTTL+1)      // maps probeTTL -> index
 		ttlAddressMap := make(map[uint8][]net.IP, maxTTL-minTTL+1) // maps probeTTL -> address
+		routeHops := make([]*apiv1.RouteHop, 0, maxTTL-minTTL+1)
 
 		// make sure the ip address is not duplicated
 		for i := 0; i < routeTrace.Length()-1; i++ {
@@ -211,7 +229,7 @@ func (p *RoutesPipeline) runRouteTraceToRouteInfoProcessor(ctx context.Context, 
 
 			for _, nearIndex := range nearIndicies { // Get the indicies for near
 				for _, farIndex := range farIndicies { // Get the indicies for far
-					routeInfo := apiv1.RouteInfo{
+					routeHop := &apiv1.RouteHop{
 						// Most important data.
 						IPAddr:   routeTrace.ReplySrcAddrs[nearIndex],
 						NextAddr: routeTrace.ReplySrcAddrs[farIndex],
@@ -235,42 +253,74 @@ func (p *RoutesPipeline) runRouteTraceToRouteInfoProcessor(ctx context.Context, 
 						RTT:                      routeTrace.RTTs[nearIndex],
 						TimeExceededReply:        routeTrace.TimeExceededReplies[nearIndex],
 					}
-
-					// push it into the outCh
-					if ok := process.Push(ctx, outch, p.errCh, routeInfo); !ok {
-						return nil
-					}
+					routeHops = append(routeHops, routeHop)
 				}
 			}
+		}
+
+		tableName := apiv1.TableName("")
+		routeInfo := RouteInfo{
+			TableName: &tableName,
+			Data:      routeHops,
+		}
+
+		// push it into the outCh
+		if ok := process.Push(ctx, outch, p.errCh, routeInfo); !ok {
+			return nil
 		}
 
 	}
 	return nil
 }
 
-func (p *RoutesPipeline) runRouteInfoToChunkUploadInfoProcessor(ctx context.Context, inCh <-chan apiv1.RouteInfo, outch chan<- ChunkUploadInfo) error {
-	routeInfoBuffer := make([]apiv1.RouteInfo, 0, p.cfg.UploadChunkSize)
+func (p *RoutesPipeline) runRouteInfoToChunkUploadInfoProcessor(ctx context.Context, inCh <-chan RouteInfo, outch chan<- ChunkUploadInfo) error {
+	// buffer for each table name, optimizable
+	routeInfoBuffer := make(map[apiv1.TableName][]*apiv1.RouteHop, p.cfg.UploadChunkSize)
 
 	for routeInfo := range inCh {
 		if ok := process.ContextValid(ctx); !ok {
 			return nil
 		}
 		// Chunk and upload
-		if len(routeInfoBuffer) == p.cfg.UploadChunkSize { // time to ship
-			if err := p.sourceClient.UploadRouteInfos(routeInfoBuffer); err != nil {
+		if len(routeInfoBuffer[*routeInfo.TableName]) == p.cfg.UploadChunkSize { // time to ship
+			if err := p.sourceClient.UploadRouteInfos(string(*routeInfo.TableName), routeInfoBuffer[*routeInfo.TableName]); err != nil {
 				return err
 			}
-			routeInfoBuffer = routeInfoBuffer[:0] // reset the slice while keeping capacity
+			routeInfoBuffer[*routeInfo.TableName] = routeInfoBuffer[*routeInfo.TableName][:0] // reset the slice while keeping capacity
+		} else {
+			routeInfoBuffer[*routeInfo.TableName] = append(routeInfoBuffer[*routeInfo.TableName], routeInfo.Data...)
 		}
 
-		if ok := process.Push(ctx, outch, p.errCh, ChunkUploadInfo{}); !ok {
+		chunkUploadInfo := ChunkUploadInfo{
+			TableName: routeInfo.TableName,
+			NumRows:   p.cfg.UploadChunkSize,
+		}
+
+		if ok := process.Push(ctx, outch, p.errCh, chunkUploadInfo); !ok {
 			return nil
 		}
 	}
 
-	// Upload remeaning chunk
-	if err := p.sourceClient.UploadRouteInfos(routeInfoBuffer); err != nil {
-		return err
+	// Upload the remeaning chunks
+	for tableName, routeInfos := range routeInfoBuffer {
+		if ok := process.ContextValid(ctx); !ok {
+			return nil
+		}
+		remeaningRows := len(routeInfos)
+
+		if err := p.sourceClient.UploadRouteInfos(string(tableName), routeInfos); err != nil {
+			return err
+		}
+
+		chunkUploadInfo := ChunkUploadInfo{
+			TableName: &tableName,
+			NumRows:   remeaningRows,
+		}
+
+		if ok := process.Push(ctx, outch, p.errCh, chunkUploadInfo); !ok {
+			return nil
+		}
 	}
+
 	return nil
 }

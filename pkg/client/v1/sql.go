@@ -167,24 +167,6 @@ func (a *SQLClient) GetTableInfoFromTableName(tablesToCheck []apiv1.TableName) (
 }
 
 func (a *SQLClient) GetTableInfo(tablesToCheck []string) ([]apiv1.ResultsTableInfo, error) {
-	// for i, tableName := range tablesToCheck { // this can be optimized bu one query
-	// 	info := v1.ResultsTableInfo{
-	// 		TableName:   tableName,
-	// 		Exists:      false,
-	// 		NumRows:     0,
-	// 		NumBytes:    0,
-	// 		ColumnNames: []string{}, // for now this is not supported
-	// 	}
-	//
-	// 	err := a.QueryRow(query.SelectTableInfo(a.database, tableName)).Scan(&info.NumRows, &info.NumBytes)
-	// 	if err != nil && err != sql.ErrNoRows {
-	// 		return nil, err
-	// 	}
-	//
-	// 	info.Exists = true
-	//
-	// 	infoToReturn[i] = info
-	// }
 	infoToReturn := make([]apiv1.ResultsTableInfo, len(tablesToCheck))
 
 	for i, tableName := range tablesToCheck { // this can be optimized bu one query
@@ -267,7 +249,39 @@ func (a *SQLClient) CreateRoutesTableIfNotExists(tableName string) error {
 	return nil
 }
 
-func (a *SQLClient) UploadRouteInfos(routeInfos apiv1.ResultsTableInfo) error {
-	panic("not implemented")
-	return nil
+func (a *SQLClient) UploadRouteInfos(tableName string, routeInfos []*apiv1.RouteHop) error {
+	tx, err := a.Begin()
+	if err != nil {
+		return err
+	}
+
+	stmt, err := tx.Prepare(query.InsertRoutes(tableName))
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for i := 0; i < len(routeInfos); i++ {
+		record := routeInfos[i]
+		if _, err := stmt.Exec(
+			record.IPAddr,
+			record.NextAddr,
+			record.FirstCaptureTimestamp,
+			record.ProbeSrcAddr,
+			record.ProbeDstAddr,
+			record.ProbeSrcPort,
+			record.ProbeDstPort,
+			record.ProbeProtocol,
+			record.IsDestinationHostReply,
+			record.IsDestinationPrefixReply,
+			record.ReplyICMPType,
+			record.ReplyICMPCode,
+			record.ReplySize,
+			record.RTT,
+			record.TimeExceededReply); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
