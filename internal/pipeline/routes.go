@@ -208,7 +208,7 @@ func (p *RoutesPipeline) runRouteTraceToRouteInfoProcessor(ctx context.Context, 
 		routeHops := make([]*apiv1.RouteHop, 0, maxTTL-minTTL+1)
 
 		// make sure the ip address is not duplicated
-		for i := 0; i < routeTrace.Length()-1; i++ {
+		for i := 0; i < routeTrace.Length(); i++ {
 			currentTTL := routeTrace.ProbeTTLs[i]
 			currentAddress := routeTrace.ReplySrcAddrs[i]
 
