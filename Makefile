@@ -23,7 +23,7 @@ build: ## Compile the executable under build/mpat
 		-o build/mpat cmd/mpat/main.go
 
 install: build ## Copy the binary into $GOPATH/bin foler.
-	install ./build/mpat "$(GO_BIN)"
+	install ./build/mpat "$(GO_BIN)/mpat"
 
 	@echo "\nTo enable shell completions:"
 	@printf "\033[36msource <(mpat completion $(SHELL_NAME))\033[0m\n"
