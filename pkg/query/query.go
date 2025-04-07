@@ -156,7 +156,7 @@ CREATE TABLE %s %s (
     probe_dst_prefix        IPv6 MATERIALIZED toIPv6(cutIPv6(probe_dst_addr, 8, 1)),
     INDEX ip_prefix_lookup (ip_addr, probe_dst_prefix) TYPE set(1000) GRANULARITY 1
 ) ENGINE = MergeTree ()
-ORDER BY (probe_protocol, probe_src_addr, probe_dst_prefix, probe_dst_addr, probe_src_port, probe_dst_port, ip_addr, first_capture_timestamp, next_addr);
+ORDER BY (probe_dst_prefix,ip_addr, first_capture_timestamp, next_addr);
 `
 	return fmt.Sprintf(formatString, ifExists, tableName)
 }
