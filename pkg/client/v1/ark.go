@@ -1,5 +1,12 @@
 package v1
 
+import (
+	"context"
+	"io"
+
+	apiv1 "github.com/dioptra-io/ufuk-research/api/v1"
+)
+
 type ArkClient struct {
 	username string
 	password string
@@ -10,6 +17,15 @@ func NewArkClient(username, password string) *ArkClient {
 		username: username,
 		password: password,
 	}
+}
+
+func (c *ArkClient) GetArkCycles(ctx context.Context, dates []apiv1.Date) ([]apiv1.ArkCycle, error) {
+	return nil, nil
+}
+
+// this downloads the wart files and unzips it using gzip
+func (c *ArkClient) DownloadUnzippedWartFile(ctx context.Context, wart apiv1.WartFile) (io.ReadCloser, error) {
+	return nil, nil
 }
 
 // func (c *ArkClient) GetCyclesFor(ctx context.Context, dates []time.Time) ([]apiv1.ArkCycle, error) {

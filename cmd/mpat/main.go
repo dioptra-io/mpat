@@ -10,6 +10,7 @@ import (
 
 	"github.com/dioptra-io/ufuk-research/internal/compute"
 	"github.com/dioptra-io/ufuk-research/internal/cp"
+	"github.com/dioptra-io/ufuk-research/internal/download"
 	"github.com/dioptra-io/ufuk-research/pkg/util"
 )
 
@@ -66,6 +67,7 @@ func main() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(cp.CpCmd())
 	rootCmd.AddCommand(compute.ComputeCmd())
+	rootCmd.AddCommand(download.DownloadCmd())
 
 	// Add the silent and debug flag
 	rootCmd.PersistentFlags().Bool("debug", false, "see debug messages")

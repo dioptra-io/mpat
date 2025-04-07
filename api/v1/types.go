@@ -3,6 +3,7 @@ package v1
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"time"
@@ -142,3 +143,51 @@ type RouteHop struct {
 	RTT                      uint16
 	TimeExceededReply        uint8
 }
+
+type Date struct {
+	Date time.Time
+}
+
+func ParseArkDate(date string) (Date, error) {
+	layout := "2006-01-02"
+	var zero Date
+	parsedTime, err := time.Parse(layout, date)
+	if err != nil {
+		return zero, nil
+	}
+	return Date{
+		Date: parsedTime,
+	}, nil
+}
+
+func (d *Date) ToArkTableName() TableName {
+	return TableName(fmt.Sprintf("ark_results__cycle%d%02d%02d", d.Date.Year(), d.Date.Month(), d.Date.Day()))
+}
+
+type ArkCredentials struct {
+	Username string
+	Pasword  string
+}
+
+func ParseArkCredentials(cred string) (ArkCredentials, error) {
+	if !strings.Contains(cred, ":") {
+		return ArkCredentials{}, fmt.Errorf("given credential format is not supported: '%s'", cred)
+	}
+	split := strings.Split(cred, ":")
+	if len(split) != 2 {
+		return ArkCredentials{}, fmt.Errorf("given credential format is not supported: '%s'", cred)
+	}
+
+	return ArkCredentials{
+		Username: split[0],
+		Pasword:  split[1],
+	}, nil
+}
+
+type ArkCycle struct {
+	ResultsTableName TableName
+	Date             Date
+	WartFiles        []WartFile
+}
+
+type WartFile string
