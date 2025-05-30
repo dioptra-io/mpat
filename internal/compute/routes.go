@@ -17,7 +17,6 @@ import (
 	"github.com/dioptra-io/ufuk-research/pkg/util"
 )
 
-// flags
 var (
 	fSourceDSN string
 
@@ -39,7 +38,7 @@ var logger = util.GetLogger()
 
 func ComputeCmd() *cobra.Command {
 	computeCmd := &cobra.Command{
-		Use:   "compute <command>",
+		Use:   "compute [command]",
 		Short: "Compute the given tables to requested.",
 		Long:  "Compute table types.",
 		Args:  computeCmdArgs,
@@ -55,7 +54,7 @@ func ComputeCmd() *cobra.Command {
 	computeCmd.PersistentFlags().IntVar(&fNumWorkers, "num-workers", config.DefaultNumWorkers, "number of parallel workers and uploaders")
 
 	computeRoutesCmd := &cobra.Command{
-		Use:   "routes <table names>...",
+		Use:   "routes [flags] <table names>...",
 		Short: "Compute the routes table from results tables.",
 		Long:  "Compute the route tables from arguments or input file.",
 		Args:  computeCmdArgs,

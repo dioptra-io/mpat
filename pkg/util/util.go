@@ -2,10 +2,14 @@ package util
 
 import (
 	"fmt"
+	"io"
 	"math"
 	"net"
+	"regexp"
 	"strings"
 	"time"
+
+	"golang.org/x/net/html"
 )
 
 func GetDatesBetween(start, end time.Time) []time.Time {
@@ -94,4 +98,49 @@ func ContainsIP(addresses []net.IP, addr net.IP) bool {
 		}
 	}
 	return false
+}
+
+func ExtractDigitHrefLinks(r io.Reader) ([]string, error) {
+	var hrefs []string
+	// Compile regex pattern to match href="digits/"
+	hrefPattern := regexp.MustCompile(`^\d+/`)
+
+	// Parse HTML from reader
+	doc, err := html.Parse(r)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing HTML: %w", err)
+	}
+
+	// Recursive function to traverse nodes
+	var traverse func(*html.Node)
+	traverse = func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "a" {
+			for _, attr := range n.Attr {
+				if attr.Key == "href" && hrefPattern.MatchString(attr.Val) {
+					hrefs = append(hrefs, attr.Val)
+				}
+			}
+		}
+		// Recurse to child nodes
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			traverse(c)
+		}
+	}
+
+	// Start traversal
+	traverse(doc)
+	return hrefs, nil
+}
+
+func ProtocolToUint8(p string) uint8 {
+	switch p {
+	case "ICMP":
+		return 1
+	case "UDP":
+		return 2
+	case "TCP":
+		return 3
+	default:
+		return 0
+	}
 }

@@ -7,6 +7,8 @@ import (
 	"net"
 	"strings"
 	"time"
+
+	"github.com/dioptra-io/ufuk-research/pkg/config"
 )
 
 type ResultsTableInfo struct {
@@ -164,6 +166,10 @@ func (d *Date) ToArkTableName() TableName {
 	return TableName(fmt.Sprintf("ark_results__cycle%d%02d%02d", d.Date.Year(), d.Date.Month(), d.Date.Day()))
 }
 
+func (d *Date) ToCycleString() string {
+	return fmt.Sprintf("cycle-%d%02d%02d", d.Date.Year(), d.Date.Month(), d.Date.Day())
+}
+
 type ArkCredentials struct {
 	Username string
 	Pasword  string
@@ -185,9 +191,34 @@ func ParseArkCredentials(cred string) (ArkCredentials, error) {
 }
 
 type ArkCycle struct {
-	ResultsTableName TableName
-	Date             Date
-	WartFiles        []WartFile
+	Date Date
 }
 
-type WartFile string
+func (c *ArkCycle) GetURL() string {
+	return fmt.Sprintf("%s/%d/%s", config.DefaultArkIPv4DatabaseBaseUrl, c.Date.Date.Year(), c.Date.ToCycleString())
+}
+
+type WartFile struct {
+	URL string
+}
+
+// This corresponds to a tow in the results table, without the materialized columns.
+type ResultsTableRow struct {
+	CaptureTimestamp time.Time
+	ProbeProtocol    uint8
+	ProbeSrcAddr     string
+	ProbeDstAddr     string
+	ProbeSrcPort     uint16
+	ProbeDstPort     uint16
+	ProbeTTL         uint8
+	QuotedTTL        uint8
+	ReplySrcAddr     string
+	ReplyProtocol    uint8
+	ReplyICMPType    uint8
+	ReplyICMPCode    uint8
+	ReplyTTL         uint8
+	ReplySize        uint16
+	ReplyMPLSLabels  [][4]uint32 // represented as slice of 4-element tuples
+	RTT              uint16
+	Round            uint8
+}
