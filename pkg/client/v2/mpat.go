@@ -60,3 +60,42 @@ func (c *MPATClient) StreamIrisResultTableRows(ctx context.Context, tableNames [
 	}()
 	return outCh, nil
 }
+
+func (c *MPATClient) StreamIrisRouteTraces(ctx context.Context, tableNames []string, bufferSize int, errCh chan<- error) (<-chan *apiv2.IrisRouteTrace, error) {
+	if c.sqlClient == nil {
+		return nil, errors.New("sql client is not defined in mpat client")
+	}
+	query := queries.SelectFromTablesGroupByFlowID(c.sqlClient.Database(), tableNames)
+	outCh := make(chan *apiv2.IrisRouteTrace, bufferSize)
+
+	go func() {
+		defer close(outCh)
+
+		rows, err := c.sqlClient.QueryContext(ctx, query)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			r, err := apiv2.ScanIrisRouteTrace(rows)
+			if err != nil {
+				errCh <- err
+				return
+			}
+
+			select {
+			case <-ctx.Done():
+				errCh <- ctx.Err()
+			case outCh <- r:
+				// Successfully sent
+			}
+		}
+
+		if err := rows.Err(); err != nil {
+			errCh <- err
+			return
+		}
+	}()
+	return outCh, nil
+}

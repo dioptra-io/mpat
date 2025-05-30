@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"github.com/dioptra-io/ufuk-research/internal/commands/quick/process"
 	"github.com/dioptra-io/ufuk-research/internal/commands/quick/stream"
 	"github.com/dioptra-io/ufuk-research/pkg/util"
 )
@@ -28,6 +29,7 @@ func QuickCmd() *cobra.Command {
 	viper.AutomaticEnv()
 
 	quickCmd.AddCommand(stream.StreamCmd())
+	quickCmd.AddCommand(process.ProcessCmd())
 
 	return quickCmd
 }

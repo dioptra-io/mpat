@@ -2,7 +2,6 @@ package stream
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -32,6 +31,14 @@ func StreamCmd() *cobra.Command {
 		Run:   irisResultsCmd,
 	}
 
+	irisRouteTracesCmd := &cobra.Command{
+		Use:   "iris-routetraces",
+		Short: "Stream iris routetraces",
+		Long:  "Streams the rows of results table groupped by flowid from the Iris",
+		Args:  irisRouteTracesCmdArgs,
+		Run:   irisRouteTracesCmd,
+	}
+
 	arkResultsCmd := &cobra.Command{
 		Use:   "ark-results",
 		Short: "Stream ark resutls",
@@ -42,6 +49,7 @@ func StreamCmd() *cobra.Command {
 
 	streamCmd.AddCommand(irisResultsCmd)
 	streamCmd.AddCommand(arkResultsCmd)
+	streamCmd.AddCommand(irisRouteTracesCmd)
 	return streamCmd
 }
 
@@ -90,13 +98,52 @@ func irisResultsCmd(cmd *cobra.Command, args []string) {
 			if !ok {
 				exit = true
 			} else {
-				data, err := json.Marshal(row)
-				if err != nil {
-					logger.Panicf("Error occured while converting the object into json: %v\n", err)
-					return
-				}
+				fmt.Printf("%v\n", row.Json())
+			}
+		}
+	}
 
-				fmt.Println(string(data))
+	logger.Println("Done!")
+}
+
+func irisRouteTracesCmdArgs(cmd *cobra.Command, args []string) error {
+	return nil
+}
+
+func irisRouteTracesCmd(cmd *cobra.Command, args []string) {
+	productionDSN := viper.GetString("production_dsn")
+
+	sqlClient, err := clientv2.NewSQLClientWithHealthCheck(productionDSN)
+	if err != nil {
+		logger.Panicf("Cannot connect to the SQL client for ClickHouse research instance: %s\n", err)
+		return
+	}
+
+	mpatClient := clientv2.NewMPATClient(sqlClient, nil)
+
+	errCh := make(chan error, 1)
+	defer close(errCh)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	rowCh, err := mpatClient.StreamIrisRouteTraces(ctx, args, config.DefaultStreamBufferSize, errCh)
+	if err != nil {
+		logger.Panicf("Cannot connect to the SQL client for ClickHouse research instance: %s\n", err)
+		return
+	}
+
+	// This looks rater ugly, but whatever.
+	for exit := false; !exit; {
+		select {
+		case err := <-errCh:
+			logger.Panicf("Error occured while streaming the table: %v\n", err)
+			return
+		case row, ok := <-rowCh:
+			if !ok {
+				exit = true
+			} else {
+				fmt.Printf("%v\n", row.Json())
 			}
 		}
 	}
