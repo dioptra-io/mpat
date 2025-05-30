@@ -1,5 +1,6 @@
 package pipeline
 
+// This part is not implemented yet.
 // import (
 // 	"context"
 // 	"errors"
@@ -12,22 +13,15 @@ package pipeline
 // 	"github.com/dioptra-io/ufuk-research/pkg/query"
 // 	"github.com/dioptra-io/ufuk-research/pkg/util"
 // )
+//
+// type WartFileInfo struct {
+// 	WartFile *apiv1.WartFile
+// }
+//
+// type f struct {
+// 	WartFile *apiv1.WartFile
+// }
 
-// type RouteTraceInfo struct {
-// 	TableName apiv1.TableName
-// 	Data      *apiv1.RouteTrace
-// }
-//
-// type RouteInfo struct {
-// 	TableName apiv1.TableName
-// 	Data      []*apiv1.RouteHop
-// }
-//
-// type ChunkUploadInfo struct {
-// 	TableName apiv1.TableName
-// 	NumRows   int
-// }
-//
 // type RoutesPipeline struct {
 // 	cfg          RoutesPipelineConfig
 // 	sourceClient *clientv1.SQLClient

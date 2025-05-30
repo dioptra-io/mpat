@@ -1,8 +1,7 @@
-package v1
+package v2
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,7 +11,6 @@ import (
 
 	_ "github.com/ClickHouse/clickhouse-go/v2"
 
-	apiv1 "github.com/dioptra-io/ufuk-research/api/v1"
 	"github.com/dioptra-io/ufuk-research/pkg/query"
 )
 
@@ -82,7 +80,7 @@ func getDatabaseNameFromDSN(dsn string) string {
 	if strings.Contains(dsn, "://") {
 		parsed, err := url.Parse(dsn)
 		if err != nil {
-			return "default"
+			return "iris"
 		}
 		return strings.TrimLeft(parsed.Path, "/")
 	}
@@ -93,7 +91,7 @@ func getDatabaseNameFromDSN(dsn string) string {
 		return parts[len(parts)-1]
 	}
 
-	return "default"
+	return "iris"
 }
 
 // Note that the query should not contain any newline.
@@ -173,131 +171,4 @@ func (a *SQLClient) HealthCheck() error {
 		return err
 	}
 	return nil
-}
-
-func (a *SQLClient) GetTableInfoFromTableName(tablesToCheck []apiv1.TableName) ([]apiv1.ResultsTableInfo, error) {
-	tableNames := make([]string, 0, len(tablesToCheck))
-	for i := 0; i < len(tablesToCheck); i++ {
-		tableNames = append(tableNames, string(tablesToCheck[i]))
-	}
-	return a.GetTableInfo(tableNames)
-}
-
-func (a *SQLClient) GetTableInfo(tablesToCheck []string) ([]apiv1.ResultsTableInfo, error) {
-	infoToReturn := make([]apiv1.ResultsTableInfo, len(tablesToCheck))
-
-	for i, tableName := range tablesToCheck { // this can be optimized bu one query
-		info := apiv1.ResultsTableInfo{
-			TableName:   tableName,
-			Exists:      false, // start with exists false
-			NumRows:     0,
-			NumBytes:    0,
-			ColumnNames: []string{}, // for now this is not supported
-		}
-		infoToReturn[i] = info
-	}
-
-	rows, err := a.Query(query.SelectTablesInfo(a.database, tablesToCheck))
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return infoToReturn, nil
-		}
-		return nil, err
-	}
-
-	current := 0
-	for rows.Next() {
-		var scannedName string
-		var scannedNumRows uint64
-		var scannedNumBytes uint64
-
-		if err := rows.Scan(&scannedName, &scannedNumRows, &scannedNumBytes); err != nil {
-			return nil, err
-		}
-
-		// iterate until it is a match
-		for current < len(infoToReturn) && scannedName != infoToReturn[current].TableName {
-			current++
-		}
-
-		if current >= len(infoToReturn) {
-			return nil, errors.New("there are more elements in query return than we have, connect to maintainer if this happens")
-		}
-
-		infoToReturn[current].Exists = true
-		infoToReturn[current].NumRows = scannedNumRows
-		infoToReturn[current].NumBytes = scannedNumBytes
-
-		current++
-	}
-
-	return infoToReturn, nil
-}
-
-func (a *SQLClient) DropTableIfNotExists(tableName string) error {
-	_, err := a.Exec(query.DropTable(tableName, true))
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (a *SQLClient) TruncateTableIfNotExists(tableName string) error {
-	_, err := a.Exec(query.TruncateTable(tableName, true))
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (a *SQLClient) CreateResultsTableIfNotExists(tableName string) error {
-	_, err := a.Exec(query.CreateResultsTable(tableName, true))
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (a *SQLClient) CreateRoutesTableIfNotExists(tableName string) error {
-	_, err := a.Exec(query.CreateRoutesTable(tableName, true))
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (a *SQLClient) UploadRouteInfos(tableName string, routeInfos []*apiv1.RouteHop) error {
-	tx, err := a.Begin()
-	if err != nil {
-		return err
-	}
-
-	stmt, err := tx.Prepare(query.InsertRoutes(tableName))
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	for _, record := range routeInfos {
-		if _, err := stmt.Exec(
-			record.IPAddr,
-			record.NextAddr,
-			record.FirstCaptureTimestamp,
-			record.ProbeSrcAddr,
-			record.ProbeDstAddr,
-			record.ProbeSrcPort,
-			record.ProbeDstPort,
-			record.ProbeProtocol,
-			record.IsDestinationHostReply,
-			record.IsDestinationPrefixReply,
-			record.ReplyICMPType,
-			record.ReplyICMPCode,
-			record.ReplySize,
-			record.RTT,
-			record.TimeExceededReply); err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
 }
