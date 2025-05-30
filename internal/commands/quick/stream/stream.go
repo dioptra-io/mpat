@@ -1,18 +1,15 @@
 package stream
 
 import (
-	"encoding/csv"
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	apiv2 "github.com/dioptra-io/ufuk-research/api/v2"
-	"github.com/dioptra-io/ufuk-research/internal/queries"
 	clientv2 "github.com/dioptra-io/ufuk-research/pkg/client/v2"
+	"github.com/dioptra-io/ufuk-research/pkg/config"
 	"github.com/dioptra-io/ufuk-research/pkg/util"
 )
 
@@ -69,73 +66,42 @@ func irisResultsCmd(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	query := queries.SelectFromTables(sqlClient.Database(), args)
-	rowCh, errCh := streamIrisResultsTableRow(*sqlClient, query)
+	mpatClient := clientv2.NewMPATClient(sqlClient, nil)
 
-	logger.Debugln("Started streaming from the results table.")
-
-	for item := range rowCh {
-		logger.Debugln("Received one object.")
-
-		data, err := json.Marshal(item)
-		if err != nil {
-			logger.Panicf("Error occured while converting the object into json: %v\n", err)
-			return
-		}
-
-		fmt.Println(string(data))
-	}
-
-	select {
-	case err := <-errCh:
-		logger.Panicf("Error occured while streaming the table: %v\n", err)
-		return
-	default:
-	}
-
-	logger.Println("Stream completed without any errors!")
-}
-
-func streamIrisResultsTableRow(sqlClient clientv2.SQLClient, query string) (<-chan apiv2.IrisResultsTableRow, <-chan error) {
-	// setting this to a big number prevented the "connection reset by peer" error
-	outCh := make(chan apiv2.IrisResultsTableRow, 10000)
 	errCh := make(chan error, 1)
+	defer close(errCh)
 
-	go func() {
-		defer close(outCh)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-		stream, err := sqlClient.Download(query)
-		if err != nil {
-			errCh <- fmt.Errorf("download error: %v", err)
+	rowCh, err := mpatClient.StreamIrisResultTableRows(ctx, args, config.DefaultStreamBufferSize, errCh)
+	if err != nil {
+		logger.Panicf("Cannot connect to the SQL client for ClickHouse research instance: %s\n", err)
+		return
+	}
+
+	// This looks rater ugly, but whatever.
+	for exit := false; !exit; {
+		select {
+		case err := <-errCh:
+			logger.Panicf("Error occured while streaming the table: %v\n", err)
 			return
+		case row, ok := <-rowCh:
+			if !ok {
+				exit = true
+			} else {
+				data, err := json.Marshal(row)
+				if err != nil {
+					logger.Panicf("Error occured while converting the object into json: %v\n", err)
+					return
+				}
+
+				fmt.Println(string(data))
+			}
 		}
-		defer stream.Close()
+	}
 
-		stream2 := io.TeeReader(stream, os.Stdout)
-		reader := csv.NewReader(stream2)
-		// no need to skip header
-
-		for {
-			record, err := reader.Read()
-			if err == io.EOF {
-				break
-			}
-
-			if err != nil {
-				errCh <- fmt.Errorf("CSV read error: %v", err)
-				return
-			}
-
-			cr, err := apiv2.NewIrisResultsTableRow(record)
-			if err != nil {
-				errCh <- fmt.Errorf("parse error: %v", err)
-				continue
-			}
-			outCh <- *cr
-		}
-	}()
-
-	return outCh, errCh
+	logger.Println("Done!")
 }
 
 func arkResultsCmdArgs(cmd *cobra.Command, args []string) error {
@@ -144,46 +110,4 @@ func arkResultsCmdArgs(cmd *cobra.Command, args []string) error {
 
 func arkResultsCmd(cmd *cobra.Command, args []string) {
 	// nop
-}
-
-func streamArkResultsTableRow(sqlClient clientv2.SQLClient, query string) (<-chan apiv2.IrisResultsTableRow, <-chan error) {
-	// setting this to a big number prevented the "connection reset by peer" error
-	outCh := make(chan apiv2.IrisResultsTableRow, 10000)
-	errCh := make(chan error, 1)
-
-	go func() {
-		defer close(outCh)
-
-		stream, err := sqlClient.Download(query)
-		if err != nil {
-			errCh <- fmt.Errorf("download error: %v", err)
-			return
-		}
-		defer stream.Close()
-
-		stream2 := io.TeeReader(stream, os.Stdout)
-		reader := csv.NewReader(stream2)
-		// no need to skip header
-
-		for {
-			record, err := reader.Read()
-			if err == io.EOF {
-				break
-			}
-
-			if err != nil {
-				errCh <- fmt.Errorf("CSV read error: %v", err)
-				return
-			}
-
-			cr, err := apiv2.NewIrisResultsTableRow(record)
-			if err != nil {
-				errCh <- fmt.Errorf("parse error: %v", err)
-				continue
-			}
-			outCh <- *cr
-		}
-	}()
-
-	return outCh, errCh
 }

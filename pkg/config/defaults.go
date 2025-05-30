@@ -11,6 +11,7 @@ const (
 	DefaultMaxRowUploadRate  = 0 // limitless
 	DefaultSkipDuplicateIPs  = false
 	DefaultMaxRetries        = 5
+	DefaultStreamBufferSize  = 10000
 
 	DefaultForcedResetFlag = false
 
