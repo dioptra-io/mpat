@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/dioptra-io/ufuk-research/internal/commands/quick"
+	"github.com/dioptra-io/ufuk-research/internal/commands/upload"
 	"github.com/dioptra-io/ufuk-research/pkg/util"
 )
 
@@ -32,9 +32,7 @@ func main() {
 			logger.SetFormatter(&logrus.TextFormatter{
 				DisableColors: false,
 				FullTimestamp: true,
-				// ForceQuote:    true,
 			})
-			// logger.SetFormatter(&logrus.TextFormatter{FullTimestamp: true, ForceColors: true})
 			logger.SetOutput(os.Stderr)
 
 			if debug {
@@ -46,7 +44,10 @@ func main() {
 			logger.Debugln("RootCmd prerun succesfull.")
 		},
 		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Help()
+			// cmd.Help()
+			dsn := viper.GetString("dsn")
+			debug := viper.GetBool("debug")
+			fmt.Printf("DSN: %s, Debug: %v\n", dsn, debug)
 		},
 	}
 
@@ -63,22 +64,21 @@ func main() {
 	}
 
 	rootCmd.AddCommand(versionCmd)
-	rootCmd.AddCommand(quick.QuickCmd())
-	// For now they are not used, they are not stable enough.
-	// rootCmd.AddCommand(cp.CpCmd())
-	// rootCmd.AddCommand(compute.ComputeCmd())
-	// rootCmd.AddCommand(download.DownloadCmd())
+	rootCmd.AddCommand(upload.UpoadCmd())
 
 	// Add the silent and debug flag
 	rootCmd.PersistentFlags().Bool("debug", false, "see debug messages")
+	rootCmd.PersistentFlags().StringP("dsn", "r", "", "dsn string of research ClickHouse database")
 
 	// Bind flag to viper
 	viper.BindPFlag("debug", rootCmd.PersistentFlags().Lookup("debug"))
+	viper.BindPFlag("dsn", rootCmd.PersistentFlags().Lookup("dsn"))
 
-	// Bind the variables to viper
-	viper.BindEnv("debug", "MPAT_DEBUG")
+	// Bind environment variables to some flags
+	viper.BindEnv("dsn", "MPAT_DSN")
 
-	viper.AutomaticEnv() // read env variables for binding to flags
+	// read env variables for binding to flags
+	viper.AutomaticEnv()
 
 	// run root command
 	if err := rootCmd.Execute(); err != nil {
