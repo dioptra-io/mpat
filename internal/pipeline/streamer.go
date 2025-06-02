@@ -39,16 +39,22 @@ func (s *ClickHouseStreamer[T]) Ingest(q queries.Query) (<-chan *T, <-chan error
 
 		rows, err := s.client.Query(query)
 		if err != nil {
-			errCh <- fmt.Errorf("streamer ingest query invokation failed: %w", err)
+			errCh <- fmt.Errorf("streamer ingest query invokation filed: %w", err)
 			return
 		}
 
 		defer rows.Close()
 
 		for rows.Next() {
-			scannableFieldPointers, err := orm.GetFieldPointers(obj)
+			objPointer := new(T)
+			scannableFieldPointers, err := orm.GetFieldPointers(objPointer)
 			if err != nil {
 				errCh <- fmt.Errorf("streamer ingest field pointer computation failed: %w", err)
+				return
+			}
+
+			if err := rows.Err(); err != nil {
+				errCh <- fmt.Errorf("streamer ingest row iteration failed: %w", err)
 				return
 			}
 
@@ -56,6 +62,8 @@ func (s *ClickHouseStreamer[T]) Ingest(q queries.Query) (<-chan *T, <-chan error
 				errCh <- fmt.Errorf("streamer ingest row scan failed: %w", err)
 				return
 			}
+
+			objCh <- objPointer
 		}
 	}()
 
@@ -100,11 +108,25 @@ func (s *ClickHouseStreamer[T]) Egress(objCh <-chan *T, errCh <-chan error, q qu
 				errCh2 <- fmt.Errorf("streamer egress insert exec failed: %w", err)
 				return
 			}
+
+			select {
+			case err := <-errCh:
+				errCh2 <- err
+				return
+			default:
+			}
 		}
 
 		if err := tx.Commit(); err != nil {
 			errCh2 <- fmt.Errorf("streamer egress commit failed: %w", err)
 			return
+		}
+
+		select {
+		case err := <-errCh:
+			errCh2 <- err
+			return
+		default:
 		}
 	}()
 

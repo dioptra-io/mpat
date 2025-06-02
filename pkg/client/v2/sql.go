@@ -10,8 +10,6 @@ import (
 	"time"
 
 	_ "github.com/ClickHouse/clickhouse-go/v2"
-
-	"github.com/dioptra-io/ufuk-research/pkg/query"
 )
 
 type SQLClient struct {
@@ -166,8 +164,7 @@ func (a *SQLClient) Upload(query string, r io.Reader) (io.ReadCloser, error) {
 }
 
 func (a *SQLClient) HealthCheck() error {
-	var one int
-	if err := a.QueryRow(query.Select1()).Scan(&one); err != nil || one != 1 {
+	if err := a.Ping(); err != nil {
 		return err
 	}
 	return nil

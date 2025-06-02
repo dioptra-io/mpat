@@ -1,8 +1,6 @@
 package upload
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -68,6 +66,18 @@ func uploadIrisResultsCmd(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	destinationManager := pipeline.NewClickHouseManager[v3.IrisResultsRow](destinationClient)
+	err = destinationManager.DeleteThenCreate(true, &queries.BasicDeleteQuery{
+		TableName:       destinationTableName,
+		AddCheckIfExist: true,
+	}, &queries.BasicCreateQuery{
+		TableName:           destinationTableName,
+		AddCheckIfNotExists: true,
+	})
+	if err != nil {
+		panic(err)
+	}
+
 	sourceStreamer := pipeline.NewClickHouseStreamer[v3.IrisResultsRow](sourceClient)
 	ingestCh, ingestErrCh := sourceStreamer.Ingest(&queries.BasicSelectQuery{
 		TableNames: sourceTableNames,
@@ -79,7 +89,9 @@ func uploadIrisResultsCmd(cmd *cobra.Command, args []string) {
 	})
 
 	for err := range egressErrCh {
-		fmt.Printf("err: %v\n", err)
-		panic(err)
+		logger.Errorf("An error occured while transfering data %v.\n", err)
+		return
 	}
+
+	logger.Println("Done!")
 }

@@ -13,14 +13,9 @@ func GetFieldJSONTags(row interface{}) ([]string, error) {
 	t := reflect.TypeOf(row)
 
 	for i := 0; i < v.NumField(); i++ {
-		valueField := v.Field(i)
 		typeField := t.Field(i)
 
-		if valueField.CanAddr() {
-			jsonNames = append(jsonNames, typeField.Tag.Get("json"))
-		} else {
-			return nil, errors.New("cannot get address of field " + typeField.Name)
-		}
+		jsonNames = append(jsonNames, typeField.Tag.Get("json"))
 	}
 
 	return jsonNames, nil
@@ -48,11 +43,13 @@ func GetInsertableFieldJSONTags(row interface{}) ([]string, error) {
 	return jsonNames, nil
 }
 
+// HERE
 func GetFieldPointers(row interface{}) ([]interface{}, error) {
 	var fields []interface{}
 
 	v := reflect.ValueOf(row)
-	t := reflect.TypeOf(row)
+	v = v.Elem()
+	t := v.Type()
 
 	for i := 0; i < v.NumField(); i++ {
 		valueField := v.Field(i)
@@ -72,20 +69,17 @@ func GetInsertableFields(row interface{}) ([]interface{}, error) {
 	var fields []interface{}
 
 	v := reflect.ValueOf(row)
-	t := reflect.TypeOf(row)
+	v = v.Elem()
+	t := v.Type()
 
 	for i := 0; i < v.NumField(); i++ {
 		valueField := v.Field(i)
 		typeField := t.Field(i)
 
-		if valueField.CanAddr() {
-			mpatTag := typeField.Tag.Get("mpat")
+		mpatTag := typeField.Tag.Get("mpat")
 
-			if !strings.Contains(mpatTag, "no-insert") {
-				fields = append(fields, valueField.Interface())
-			}
-		} else {
-			return nil, errors.New("cannot get address of field " + typeField.Name)
+		if !strings.Contains(mpatTag, "no-insert") {
+			fields = append(fields, valueField.Interface())
 		}
 	}
 
