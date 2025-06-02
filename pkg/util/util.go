@@ -42,9 +42,6 @@ func GetDatesBetweenFromString(start, end string) ([]time.Time, error) {
 }
 
 func ParseDateTime(dt string) (time.Time, error) {
-	if strings.Contains(dt, " ") {
-		return time.Parse("2006-01-02 15:04:05", dt)
-	}
 	return time.Parse("2006-01-02", dt)
 }
 

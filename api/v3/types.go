@@ -46,3 +46,8 @@ type IrisResultsRow struct {
 	ValidProbeProtocol     uint8       `json:"valid_probe_protocol"     mpat:"no-insert"` // Computed
 	TimeExceededReply      uint8       `json:"time_exceeded_reply"      mpat:"no-insert"` // Computed
 }
+
+// Ark specific stuff
+type WartFile struct {
+	URL string
+}

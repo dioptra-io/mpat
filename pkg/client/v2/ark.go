@@ -15,6 +15,7 @@ import (
 	"time"
 
 	apiv1 "github.com/dioptra-io/ufuk-research/api/v1"
+	"github.com/dioptra-io/ufuk-research/pkg/config"
 	"github.com/dioptra-io/ufuk-research/pkg/util"
 )
 
@@ -23,11 +24,11 @@ type ArkClient struct {
 	password string
 }
 
-func NewArkClient(username, password string) *ArkClient {
+func NewArkClient(username, password string) (*ArkClient, error) {
 	return &ArkClient{
 		username: username,
 		password: password,
-	}
+	}, nil
 }
 
 func (c *ArkClient) GetArkCycles(ctx context.Context, dates []apiv1.Date) ([]apiv1.ArkCycle, error) {
@@ -42,55 +43,59 @@ func (c *ArkClient) GetArkCycles(ctx context.Context, dates []apiv1.Date) ([]api
 	return arkCycles, nil
 }
 
-func (c *ArkClient) GetWartFiles(ctx context.Context, cycles []apiv1.ArkCycle) ([]apiv1.WartFile, error) {
-	arkWartFiles := make([]apiv1.WartFile, 0)
+func (c *ArkClient) GetWartFiles(ctx context.Context, t time.Time) ([]string, error) {
+	arkWartFiles := make([]string, 0)
 
-	for _, cycle := range cycles {
-		req, err := http.NewRequest("GET", cycle.GetURL(), nil)
-		if err != nil {
-			return nil, err
-		}
+	req, err := http.NewRequest("GET", getCycleURL(t), nil)
+	if err != nil {
+		return nil, err
+	}
 
-		req.SetBasicAuth(c.username, c.password)
+	req.SetBasicAuth(c.username, c.password)
 
-		client := &http.Client{}
+	client := &http.Client{}
 
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, err
-		}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
 
-		defer resp.Body.Close()
+	defer resp.Body.Close()
 
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, err
-		}
-		content := string(body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	content := string(body)
 
-		re := regexp.MustCompile("\".*gz\"")
+	re := regexp.MustCompile("\".*gz\"")
 
-		matches := re.FindAllString(content, -1)
+	matches := re.FindAllString(content, -1)
 
-		if len(matches) == 0 {
-			return nil, fmt.Errorf("no match for the cycle-page")
-		}
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("no match for the cycle-page")
+	}
 
-		for i := 0; i < len(matches); i++ {
-			wartFilename := strings.ReplaceAll(matches[i], "\"", "")
-			wartFile := apiv1.WartFile{
-				URL: fmt.Sprintf("%s/%s", cycle.GetURL(), wartFilename),
-			}
-			arkWartFiles = append(arkWartFiles, wartFile)
-		}
+	for i := 0; i < len(matches); i++ {
+		wartFilename := strings.ReplaceAll(matches[i], "\"", "")
+		wartFileURL := fmt.Sprintf("%s/%s", getCycleURL(t), wartFilename)
+		arkWartFiles = append(arkWartFiles, wartFileURL)
 	}
 
 	return arkWartFiles, nil
 }
 
+func getCycleString(t time.Time) string {
+	return fmt.Sprintf("cycle-%d%02d%02d", t.Year(), t.Month(), t.Day())
+}
+
+func getCycleURL(t time.Time) string {
+	return fmt.Sprintf("%s/%d/%s", config.DefaultArkIPv4DatabaseBaseUrl, t.Year(), getCycleString(t))
+}
+
 // this downloads the wart files and unzips it using gzip
-func (c *ArkClient) DownloadRouteTraces(ctx context.Context, wart apiv1.WartFile) (<-chan apiv1.ResultsTableRow, error) {
-	wartReader, err := newWartReader(ctx, wart, c.username, c.password)
+func (c *ArkClient) DownloadRouteTraces(ctx context.Context, wartURL string) (<-chan apiv1.ResultsTableRow, error) {
+	wartReader, err := newWartReader(ctx, wartURL, c.username, c.password)
 	if err != nil {
 		return nil, err
 	}
@@ -114,8 +119,8 @@ func (c *ArkClient) DownloadRouteTraces(ctx context.Context, wart apiv1.WartFile
 }
 
 // Creates a new wart reader which reads from the main database of ark. It performs a http request.
-func newWartReader(ctx context.Context, wartFile apiv1.WartFile, username, password string) (io.ReadCloser, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", wartFile.URL, nil)
+func newWartReader(ctx context.Context, wartURL string, username, password string) (io.ReadCloser, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", wartURL, nil)
 	if err != nil {
 		return nil, err
 	}

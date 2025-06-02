@@ -13,7 +13,8 @@ import (
 type ClickHouseStreamer[T any] struct {
 	BufferSize      int
 	EgressChunkSize int
-	client          *clientv2.SQLClient
+
+	client *clientv2.SQLClient
 }
 
 func NewClickHouseStreamer[T any](client *clientv2.SQLClient) *ClickHouseStreamer[T] {
