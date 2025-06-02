@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"database/sql"
 	"fmt"
 
 	"github.com/dioptra-io/ufuk-research/cmd/orm"
@@ -10,14 +11,16 @@ import (
 )
 
 type ClickHouseStreamer[T any] struct {
-	BufferSize int
-	client     *clientv2.SQLClient
+	BufferSize      int
+	EgressChunkSize int
+	client          *clientv2.SQLClient
 }
 
 func NewClickHouseStreamer[T any](client *clientv2.SQLClient) *ClickHouseStreamer[T] {
 	return &ClickHouseStreamer[T]{
-		client:     client,
-		BufferSize: config.DefaultStreamBufferSize,
+		client:          client,
+		BufferSize:      config.DefaultStreamBufferSize,
+		EgressChunkSize: config.DefaultUploadChunkSize,
 	}
 }
 
@@ -75,6 +78,9 @@ func (s *ClickHouseStreamer[T]) Egress(objCh <-chan *T, errCh <-chan error, q qu
 
 	go func() {
 		defer close(errCh2)
+		var tx *sql.Tx
+		var stmt *sql.Stmt
+		var err error
 		var obj T
 
 		q.Set(s.client, obj)
@@ -84,20 +90,40 @@ func (s *ClickHouseStreamer[T]) Egress(objCh <-chan *T, errCh <-chan error, q qu
 			return
 		}
 
-		tx, err := s.client.Begin()
-		if err != nil {
-			errCh2 <- fmt.Errorf("streamer egress begin transaction failed: %w", err)
+		beginTx := func() error {
+			tx, err = s.client.Begin()
+			if err != nil {
+				return fmt.Errorf("streamer egress begin transaction failed: %w", err)
+			}
+
+			stmt, err = tx.Prepare(query)
+			if err != nil {
+				return fmt.Errorf("streamer egress prepare insert failed: %w", err)
+			}
+			return nil
+		}
+
+		commitTx := func() error {
+			if stmt != nil {
+				stmt.Close()
+			}
+			if tx != nil {
+				if err := tx.Commit(); err != nil {
+					return fmt.Errorf("streamer egress commit failed: %w", err)
+				}
+			}
+			return nil
+		}
+
+		if err := beginTx(); err != nil {
+			errCh2 <- err
 			return
 		}
 
-		stmt, err := tx.Prepare(query)
-		if err != nil {
-			errCh2 <- fmt.Errorf("streamer egress prepare insert failed: %w", err)
-			return
-		}
-		defer stmt.Close()
+		counter := 0
 
 		for obj := range objCh {
+			counter++
 			insertableFields, err := orm.GetInsertableFields(obj)
 			if err != nil {
 				errCh2 <- fmt.Errorf("streamer egress insertable field computation failed: %w", err)
@@ -109,6 +135,19 @@ func (s *ClickHouseStreamer[T]) Egress(objCh <-chan *T, errCh <-chan error, q qu
 				return
 			}
 
+			if counter%s.EgressChunkSize == 0 {
+				// Commit current chunk
+				if err := commitTx(); err != nil {
+					errCh2 <- err
+					return
+				}
+				// Start new transaction
+				if err := beginTx(); err != nil {
+					errCh2 <- err
+					return
+				}
+			}
+
 			select {
 			case err := <-errCh:
 				errCh2 <- err
@@ -117,8 +156,8 @@ func (s *ClickHouseStreamer[T]) Egress(objCh <-chan *T, errCh <-chan error, q qu
 			}
 		}
 
-		if err := tx.Commit(); err != nil {
-			errCh2 <- fmt.Errorf("streamer egress commit failed: %w", err)
+		if err := commitTx(); err != nil {
+			errCh2 <- err
 			return
 		}
 
