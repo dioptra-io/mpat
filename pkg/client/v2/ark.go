@@ -15,6 +15,7 @@ import (
 	"time"
 
 	apiv1 "github.com/dioptra-io/ufuk-research/api/v1"
+	v3 "github.com/dioptra-io/ufuk-research/api/v3"
 	"github.com/dioptra-io/ufuk-research/pkg/config"
 	"github.com/dioptra-io/ufuk-research/pkg/util"
 )
@@ -94,28 +95,47 @@ func getCycleURL(t time.Time) string {
 }
 
 // this downloads the wart files and unzips it using gzip
-func (c *ArkClient) DownloadRouteTraces(ctx context.Context, wartURL string) (<-chan apiv1.ResultsTableRow, error) {
+func (c *ArkClient) DownloadRouteTraces(ctx context.Context, wartURL string) (<-chan *v3.IrisResultsRow, error) {
 	wartReader, err := newWartReader(ctx, wartURL, c.username, c.password)
 	if err != nil {
 		return nil, err
 	}
-	defer wartReader.Close()
 
-	unzipReader, err := gzip.NewReader(wartReader)
+	unzipReader, err := newGzipReader(wartReader)
 	if err != nil {
 		return nil, err
 	}
-	defer unzipReader.Close()
 
 	pantraceReader, err := newPantraceReader(unzipReader)
 	if err != nil {
 		return nil, err
 	}
-	defer pantraceReader.Close()
 
 	resultsTableRowReader := newResultsTableRowReader(pantraceReader)
 
 	return resultsTableRowReader, nil
+}
+
+func newGzipReader(r io.ReadCloser) (io.ReadCloser, error) {
+	pr, pw := io.Pipe()
+
+	go func() {
+		defer r.Close()
+		defer pw.Close()
+
+		gzipReader, err := gzip.NewReader(r)
+		if err != nil {
+			pw.CloseWithError(fmt.Errorf("gzip reader error: %w", err))
+			return
+		}
+		defer gzipReader.Close()
+
+		if _, err := io.Copy(pw, gzipReader); err != nil {
+			pw.CloseWithError(fmt.Errorf("copy error: %w", err))
+		}
+	}()
+
+	return pr, nil
 }
 
 // Creates a new wart reader which reads from the main database of ark. It performs a http request.
@@ -143,7 +163,7 @@ func newWartReader(ctx context.Context, wartURL string, username, password strin
 //
 // To overcome this we might return an error chan instead of just an error. But I am too
 // lazy to implement that rn.
-func newPantraceReader(r io.Reader) (io.ReadCloser, error) {
+func newPantraceReader(r io.ReadCloser) (io.ReadCloser, error) {
 	logger := util.GetLogger()
 
 	pantrace := exec.Command(
@@ -151,7 +171,7 @@ func newPantraceReader(r io.Reader) (io.ReadCloser, error) {
 		"--from",
 		"scamper-trace-warts",
 		"--to",
-		"iris")
+		"flat")
 
 	stdin, err := pantrace.StdinPipe()
 	if err != nil {
@@ -176,6 +196,7 @@ func newPantraceReader(r io.Reader) (io.ReadCloser, error) {
 	// A better method might be the usage of pipes, but for now this is works.
 	go func() {
 		defer stdin.Close()
+		defer r.Close()
 		if numBytesRead, err := io.Copy(stdin, r); err != nil {
 			logger.Panicf("Error while converting the wart using pantrace: %v.\n", err)
 		} else {
@@ -196,105 +217,30 @@ func newPantraceReader(r io.Reader) (io.ReadCloser, error) {
 	return stdout, nil
 }
 
-func newResultsTableRowReader(r io.Reader) <-chan apiv1.ResultsTableRow {
-	// Reply holds the information from the target’s response
-	type Reply struct {
-		Timestamp time.Time `json:"timestamp"`
-		QuotedTTL int       `json:"quoted_ttl"`
-		TTL       int       `json:"ttl"`
-		Size      int       `json:"size"`
-		Addr      string    `json:"addr"`
-		ICMPType  int       `json:"icmp_type"`
-		ICMPCode  int       `json:"icmp_code"`
-		// MPLSLabels [][4]int  `json:"mpls_labels"`
-		RTT float64 `json:"rtt"`
-	}
-
-	// Probe is one ping/probe attempt
-	type Probe struct {
-		Timestamp time.Time `json:"timestamp"`
-		Size      int       `json:"size"`
-		Reply     *Reply    `json:"reply"`
-	}
-
-	// Hop groups a set of probes at a given TTL
-	type Hop struct {
-		TTL    int     `json:"ttl"`
-		Probes []Probe `json:"probes"`
-	}
-
-	// Flow is one of potentially many in a Measurement
-	type Flow struct {
-		SrcPort int   `json:"src_port"`
-		DstPort int   `json:"dst_port"`
-		Hops    []Hop `json:"hops"`
-	}
-
-	// Measurement corresponds to the top‐level JSON object
-	type Measurement struct {
-		MeasurementName string    `json:"measurement_name"`
-		MeasurementID   string    `json:"measurement_id"`
-		AgentID         string    `json:"agent_id"`
-		StartTime       time.Time `json:"start_time"`
-		EndTime         time.Time `json:"end_time"`
-		Protocol        string    `json:"protocol"`
-		SrcAddr         string    `json:"src_addr"`
-		SrcAddrPublic   *string   `json:"src_addr_public"`
-		DstAddr         string    `json:"dst_addr"`
-		Flows           []Flow    `json:"flows"`
-	}
-
-	ch := make(chan apiv1.ResultsTableRow)
+func newResultsTableRowReader(r io.ReadCloser) <-chan *v3.IrisResultsRow {
+	ch := make(chan *v3.IrisResultsRow)
 	go func() {
 		defer close(ch)
+		defer r.Close()
+
 		scanner := bufio.NewScanner(r)
+
+		buf := make([]byte, 0, 1024*1024) // 1 MB buffer for the scanner
+		scanner.Buffer(buf, 1024*1024)
+
 		for scanner.Scan() {
-			var m Measurement
-			if err := json.Unmarshal(scanner.Bytes(), &m); err != nil {
+			var measurementList []v3.IrisResultsRow
+
+			if err := json.Unmarshal(scanner.Bytes(), &measurementList); err != nil {
 				log.Printf("failed to unmarshal measurement: %v", err)
 				continue
 			}
 
-			for _, flow := range m.Flows {
-				for _, hop := range flow.Hops {
-					for _, probe := range hop.Probes {
-						// Skip if no reply
-						if probe.Reply == nil {
-							continue
-						}
-
-						// Convert MPLS labels
-						var labels [][4]uint32
-						// MPLS Labes are not read for now.
-						// for _, label := range probe.Reply.MPLSLabels {
-						// 	// Assuming a placeholder since your JSON shows []int, but ClickHouse uses Tuple
-						// 	// This step will depend on actual label structure
-						// 	labels = append(labels, [4]uint32{label, 0, 0, 0})
-						// }
-
-						row := apiv1.ResultsTableRow{
-							CaptureTimestamp: probe.Reply.Timestamp.Truncate(time.Second), // 1-second resolution
-							ProbeProtocol:    util.ProtocolToUint8(m.Protocol),
-							ProbeSrcAddr:     m.SrcAddr,
-							ProbeDstAddr:     m.DstAddr,
-							ProbeSrcPort:     uint16(flow.SrcPort),
-							ProbeDstPort:     uint16(flow.DstPort),
-							ProbeTTL:         uint8(hop.TTL),
-							QuotedTTL:        uint8(probe.Reply.QuotedTTL),
-							ReplySrcAddr:     probe.Reply.Addr,
-							ReplyProtocol:    util.ProtocolToUint8(m.Protocol),
-							ReplyICMPType:    uint8(probe.Reply.ICMPType),
-							ReplyICMPCode:    uint8(probe.Reply.ICMPCode),
-							ReplyTTL:         uint8(probe.Reply.TTL),
-							ReplySize:        uint16(probe.Reply.Size),
-							ReplyMPLSLabels:  labels,
-							RTT:              uint16(probe.Reply.RTT), // Potential truncation — handle overflow if RTT > 65535
-							Round:            1,                       // Placeholder — you can inject it externally
-						}
-						ch <- row
-					}
-				}
+			for _, measurement := range measurementList {
+				m := measurement // shallow copy
+				ch <- &m
 			}
+
 		}
 		if err := scanner.Err(); err != nil {
 			log.Printf("error scanning measurements: %v", err)

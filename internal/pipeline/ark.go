@@ -2,11 +2,9 @@ package pipeline
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	apiv3 "github.com/dioptra-io/ufuk-research/api/v3"
-	v3 "github.com/dioptra-io/ufuk-research/api/v3"
 	clientv2 "github.com/dioptra-io/ufuk-research/pkg/client/v2"
 	"github.com/dioptra-io/ufuk-research/pkg/config"
 )
@@ -39,8 +37,6 @@ func (s *ArkStreamer) Ingest(t time.Time) (<-chan *apiv3.IrisResultsRow, <-chan 
 		}
 
 		for _, url := range urls {
-			fmt.Printf("urls: %v\n", url)
-
 			currentCh, err := s.client.DownloadRouteTraces(context.Background(), url)
 			if err != nil {
 				errCh <- err
@@ -48,9 +44,7 @@ func (s *ArkStreamer) Ingest(t time.Time) (<-chan *apiv3.IrisResultsRow, <-chan 
 			}
 
 			for obj := range currentCh {
-				objCh <- &v3.IrisResultsRow{
-					CaptureTimestamp: obj.CaptureTimestamp, // lol
-				}
+				objCh <- obj
 			}
 		}
 	}()
