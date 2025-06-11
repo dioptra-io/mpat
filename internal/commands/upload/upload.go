@@ -183,7 +183,6 @@ func uploadArkResultsCmd(cmd *cobra.Command, args []string) {
 	ingestCh, ingestErrCh := sourceStreamer.Ingest(sourceDate)
 
 	destinationStreamer := pipeline.NewClickHouseStreamer[v3.IrisResultsRow](destinationClient)
-	destinationStreamer.EgressChunkSize = 10
 	egressErrCh := destinationStreamer.Egress(ingestCh, ingestErrCh, &queries.BasicInsertQuery{
 		TableName: destinationTableName,
 	})
