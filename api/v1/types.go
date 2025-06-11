@@ -170,6 +170,10 @@ func (d *Date) ToCycleString() string {
 	return fmt.Sprintf("cycle-%d%02d%02d", d.Date.Year(), d.Date.Month(), d.Date.Day())
 }
 
+func (d *Date) Contains(t time.Time) bool {
+	return d.Date.Year() == t.Year() && d.Date.Month() == t.Month() && d.Date.Day() == t.Day()
+}
+
 type ArkCredentials struct {
 	Username string
 	Pasword  string

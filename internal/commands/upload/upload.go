@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	v1 "github.com/dioptra-io/ufuk-research/api/v1"
 	v3 "github.com/dioptra-io/ufuk-research/api/v3"
 	"github.com/dioptra-io/ufuk-research/internal/pipeline"
 	"github.com/dioptra-io/ufuk-research/internal/queries"
@@ -30,7 +31,9 @@ func UpoadCmd() *cobra.Command {
 		Run:   uploadIrisResultsCmd,
 	}
 	uploadIrisResultsCmd.Flags().StringP("source-dsn", "s", "", "dsn string of production clickhouse database")
+	uploadIrisResultsCmd.Flags().Bool("ipv4", true, "use only ipv4 measurement tables")
 	viper.BindPFlag("source-dsn", uploadIrisResultsCmd.Flags().Lookup("source-dsn"))
+	viper.BindPFlag("ipv4", uploadIrisResultsCmd.Flags().Lookup("ipv4"))
 	viper.BindEnv("source-dsn", "MPAT_PROD_DSN")
 
 	uploadArkResultsCmd := &cobra.Command{
@@ -64,8 +67,28 @@ func uploadIrisResultsCmd(cmd *cobra.Command, args []string) {
 	}
 	destinationDSNString := viper.GetString("dsn")
 	sourceDSNString := viper.GetString("source-dsn")
+	onlyIPv4Measurements := viper.GetBool("ipv4")
 	destinationTableName := args[0]
-	sourceTableNames := args[1]
+
+	sourceDate, err := v1.ParseArkDate(args[1])
+	if err != nil {
+		logger.Errorf("Cannot parse given date: %v\n.", err)
+		return
+	}
+
+	irisClient, err := clientv2.NewIrisClientWithJWT()
+	if err != nil {
+		logger.Errorf("Iris client health check failed: %v\n.", err)
+		return
+	}
+
+	logger.Println("Iris API health check positive.")
+
+	sourceTableNames, err := irisClient.GetTableNamesFor(onlyIPv4Measurements, false, sourceDate)
+	if err != nil {
+		logger.Errorf("Iris client fetch table failed: %v.\n", err)
+		return
+	}
 
 	logger.Debugf("Running command with %d source tables.\n", len(sourceTableNames))
 

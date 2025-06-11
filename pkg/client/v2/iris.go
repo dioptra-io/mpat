@@ -8,8 +8,11 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
+	"strings"
 
+	v1 "github.com/dioptra-io/ufuk-research/api/v1"
 	apiv3 "github.com/dioptra-io/ufuk-research/api/v3"
 	"github.com/dioptra-io/ufuk-research/pkg/config"
 )
@@ -20,19 +23,79 @@ type IrisClient struct {
 }
 
 func NewIrisClientWithJWT() (*IrisClient, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-	content, err := os.ReadFile(path.Join(homeDir, config.DefaultIrisctlJWTPath))
+	err := refreshToken()
 	if err != nil {
 		return nil, err
 	}
 
-	return &IrisClient{
-		jwt:     string(content),
+	token, err := readToken()
+	if err != nil {
+		return nil, err
+	}
+
+	c := &IrisClient{
+		jwt:     token,
 		baseURL: config.DefaultIrisAPIURL,
-	}, nil
+	}
+
+	return c, nil
+}
+
+func readToken() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	content, err := os.ReadFile(path.Join(homeDir, config.DefaultIrisctlJWTPath))
+	if err != nil {
+		return "", err
+	}
+
+	return string(content), err
+}
+
+func (c *IrisClient) GetTableNamesFor(ipv4, finished bool, date v1.Date) ([]string, error) {
+	var tableNames []string
+	meas, err := c.GetAllMeasurementsOn(ipv4, finished, date)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, m := range meas {
+		for _, a := range m.Agents {
+			tableName := fmt.Sprintf("results__%s__%s", strings.ReplaceAll(m.UUID, "-", "_"), strings.ReplaceAll(a.AgentUUID, "-", "_"))
+			tableNames = append(tableNames, tableName)
+		}
+	}
+
+	return tableNames, nil
+}
+
+func (c *IrisClient) GetAllMeasurementsOn(ipv4, finished bool, date v1.Date) ([]apiv3.IrisctlMeasurement, error) {
+	meas, err := c.GetAllMeasurements(ipv4, finished)
+	if err != nil {
+		return nil, err
+	}
+
+	var filtered []apiv3.IrisctlMeasurement
+	for _, m := range meas {
+		if date.Contains(m.StartTime.Time) {
+			filtered = append(filtered, m)
+		}
+	}
+
+	return filtered, nil
+}
+
+func refreshToken() error {
+	cmd := exec.Command("irisctl", "meas")
+
+	_, err := cmd.CombinedOutput()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (c *IrisClient) GetAllMeasurements(ipv4, finished bool) ([]apiv3.IrisctlMeasurement, error) {
@@ -41,7 +104,7 @@ func (c *IrisClient) GetAllMeasurements(ipv4, finished bool) ([]apiv3.IrisctlMea
 		tagString = config.DefaultIPv6Tag
 	}
 
-	results, err := c.GetMeasurements(tagString, config.MaxIrisAPILimit, 0, finished)
+	results, err := c.getMeasurements(tagString, config.MaxIrisAPILimit, 0, finished)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +114,7 @@ func (c *IrisClient) GetAllMeasurements(ipv4, finished bool) ([]apiv3.IrisctlMea
 
 	for i := 0; i < numCallsToMake; i++ {
 		offset := (i + 1) * config.MaxIrisAPILimit
-		results, err := c.GetMeasurements(tagString, config.MaxIrisAPILimit, offset, finished)
+		results, err := c.getMeasurements(tagString, config.MaxIrisAPILimit, offset, finished)
 		if err != nil {
 			return nil, err
 		}
@@ -62,7 +125,7 @@ func (c *IrisClient) GetAllMeasurements(ipv4, finished bool) ([]apiv3.IrisctlMea
 	return measurements, nil
 }
 
-func (c *IrisClient) GetMeasurements(tag string, limit, offset int, finished bool) (*apiv3.IrisctlMeasurementResponse, error) {
+func (c *IrisClient) getMeasurements(tag string, limit, offset int, finished bool) (*apiv3.IrisctlMeasurementResponse, error) {
 	finishedString := ""
 	if finished {
 		finishedString = "state=finished&"
