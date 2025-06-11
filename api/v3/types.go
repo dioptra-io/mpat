@@ -51,3 +51,44 @@ type IrisResultsRow struct {
 type WartFile struct {
 	URL string
 }
+
+type IrisctlMeasurementResponse struct {
+	Count    int                  `json:"count"`
+	Next     string               `json:"next"`
+	Previous *string              `json:"previous"`
+	Results  []IrisctlMeasurement `json:"results"`
+}
+
+type IrisctlMeasurement struct {
+	Tool         string               `json:"tool"`
+	Tags         []string             `json:"tags"`
+	UUID         string               `json:"uuid"`
+	UserID       string               `json:"user_id"`
+	CreationTime *IrisAPITime         `json:"creation_time"`
+	StartTime    *IrisAPITime         `json:"start_time"`
+	EndTime      *IrisAPITime         `json:"end_time"`
+	State        string               `json:"state"`
+	Agents       []IrisctlAgentRecord `json:"agents"`
+}
+
+type IrisctlAgentRecord struct {
+	AgentUUID string `json:"agent_uuid"`
+}
+
+type IrisAPITime struct {
+	time.Time
+}
+
+const localLayout = "2006-01-02T15:04:05.999999"
+
+func (lt *IrisAPITime) UnmarshalJSON(b []byte) error {
+	s := string(b)
+	// Remove quotes
+	s = s[1 : len(s)-1]
+	t, err := time.Parse(localLayout, s)
+	if err != nil {
+		return err
+	}
+	lt.Time = t
+	return nil
+}

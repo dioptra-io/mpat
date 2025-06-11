@@ -91,7 +91,7 @@ func getCycleString(t time.Time) string {
 }
 
 func getCycleURL(t time.Time) string {
-	return fmt.Sprintf("%s/%d/%s", config.DefaultArkIPv4DatabaseBaseUrl, t.Year(), getCycleString(t))
+	return fmt.Sprintf("%s/%d/%s", config.DefaultArkIPv4DatabaseBaseURL, t.Year(), getCycleString(t))
 }
 
 // this downloads the wart files and unzips it using gzip

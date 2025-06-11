@@ -195,7 +195,7 @@ type ArkCycle struct {
 }
 
 func (c *ArkCycle) GetURL() string {
-	return fmt.Sprintf("%s/%d/%s", config.DefaultArkIPv4DatabaseBaseUrl, c.Date.Date.Year(), c.Date.ToCycleString())
+	return fmt.Sprintf("%s/%d/%s", config.DefaultArkIPv4DatabaseBaseURL, c.Date.Date.Year(), c.Date.ToCycleString())
 }
 
 type WartFile struct {

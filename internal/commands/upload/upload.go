@@ -23,7 +23,7 @@ func UpoadCmd() *cobra.Command {
 	}
 
 	uploadIrisResultsCmd := &cobra.Command{
-		Use:   "iris-results <destination-table-name> [<source-table-names>...]",
+		Use:   "iris-results <destination-table-name> <source-date>",
 		Short: "Copy the iris results table.",
 		Long:  "Copy the iris results table from prod to working ClickHouse database.",
 		Args:  cobra.ArbitraryArgs,
@@ -65,7 +65,7 @@ func uploadIrisResultsCmd(cmd *cobra.Command, args []string) {
 	destinationDSNString := viper.GetString("dsn")
 	sourceDSNString := viper.GetString("source-dsn")
 	destinationTableName := args[0]
-	sourceTableNames := args[1:]
+	sourceTableNames := args[1]
 
 	logger.Debugf("Running command with %d source tables.\n", len(sourceTableNames))
 
