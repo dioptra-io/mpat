@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"github.com/dioptra-io/ufuk-research/internal/commands/process"
 	"github.com/dioptra-io/ufuk-research/internal/commands/upload"
 	"github.com/dioptra-io/ufuk-research/pkg/util"
 )
@@ -65,6 +66,7 @@ func main() {
 
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(upload.UpoadCmd())
+	rootCmd.AddCommand(process.ProcessCmd())
 
 	// Add the silent and debug flag
 	rootCmd.PersistentFlags().Bool("debug", false, "see debug messages")

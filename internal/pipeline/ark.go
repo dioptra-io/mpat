@@ -36,6 +36,7 @@ func (s *ArkStreamer) Ingest(t time.Time) (<-chan *apiv3.IrisResultsRow, <-chan 
 			return
 		}
 
+		// make this part parallel?
 		for _, url := range urls {
 			currentCh, err := s.client.DownloadRouteTraces(context.Background(), url)
 			if err != nil {

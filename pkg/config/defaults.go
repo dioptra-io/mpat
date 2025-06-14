@@ -4,14 +4,15 @@ import "time"
 
 // These values are the default values used in the app.
 const (
-	DefaultParallelDownloads = 8
-	DefaultNumWorkers        = 12
-	DefaultChunkSize         = 100000
-	DefaultUploadChunkSize   = 100000
-	DefaultMaxRowUploadRate  = 0 // limitless
-	DefaultSkipDuplicateIPs  = false
-	DefaultMaxRetries        = 5
-	DefaultStreamBufferSize  = 10000
+	DefaultNumParallelWorkersInPipeline = 8
+	DefaultParallelDownloads            = 8
+	DefaultNumWorkers                   = 12
+	DefaultChunkSize                    = 100000
+	DefaultUploadChunkSize              = 100000
+	DefaultMaxRowUploadRate             = 0 // limitless
+	DefaultSkipDuplicateIPs             = false
+	DefaultMaxRetries                   = 5
+	DefaultStreamBufferSize             = 10000
 
 	DefaultForcedResetFlag = false
 
