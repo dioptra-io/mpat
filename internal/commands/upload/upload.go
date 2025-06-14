@@ -24,7 +24,7 @@ func UpoadCmd() *cobra.Command {
 	}
 
 	uploadIrisResultsCmd := &cobra.Command{
-		Use:   "iris-results <destination-table-name> <source-date>",
+		Use:   "iris-results <source-date> <destination-table-name>",
 		Short: "Copy the iris results table.",
 		Long:  "Copy the iris results table from prod to working ClickHouse database.",
 		Args:  cobra.ArbitraryArgs,
@@ -37,7 +37,7 @@ func UpoadCmd() *cobra.Command {
 	viper.BindEnv("source-dsn", "MPAT_PROD_DSN")
 
 	uploadArkResultsCmd := &cobra.Command{
-		Use:   "ark-results <destination-table-name> <source-date>",
+		Use:   "ark-results <source-date> <destination-table-name>",
 		Short: "Copy the ark results table.",
 		Long:  "Copy the ark results table from prod to working ClickHouse database.",
 		Args:  cobra.ExactArgs(2),
@@ -68,9 +68,9 @@ func uploadIrisResultsCmd(cmd *cobra.Command, args []string) {
 	destinationDSNString := viper.GetString("dsn")
 	sourceDSNString := viper.GetString("source-dsn")
 	onlyIPv4Measurements := viper.GetBool("ipv4")
-	destinationTableName := args[0]
+	destinationTableName := args[1]
 
-	sourceDate, err := v1.ParseArkDate(args[1])
+	sourceDate, err := v1.ParseArkDate(args[0])
 	if err != nil {
 		logger.Errorf("Cannot parse given date: %v\n.", err)
 		return
@@ -146,8 +146,8 @@ func uploadArkResultsCmd(cmd *cobra.Command, args []string) {
 	destinationDSNString := viper.GetString("dsn")
 	arkUser := viper.GetString("ark-user")
 	arkPassword := viper.GetString("ark-password")
-	destinationTableName := args[0]
-	sourceDate, err := util.ParseDateTime(args[1])
+	destinationTableName := args[1]
+	sourceDate, err := util.ParseDateTime(args[0])
 	if err != nil {
 		logger.Errorf("Given date is not in format 'YYYY-MM-DD': %s.\n", args[1])
 		return
