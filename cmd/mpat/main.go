@@ -70,11 +70,13 @@ func main() {
 
 	// Add the silent and debug flag
 	rootCmd.PersistentFlags().Bool("debug", false, "see debug messages")
+	rootCmd.PersistentFlags().Bool("force", false, "force delete the existing table")
 	rootCmd.PersistentFlags().StringP("dsn", "r", "", "dsn string of research ClickHouse database")
 
 	// Bind flag to viper
 	viper.BindPFlag("debug", rootCmd.PersistentFlags().Lookup("debug"))
 	viper.BindPFlag("dsn", rootCmd.PersistentFlags().Lookup("dsn"))
+	viper.BindPFlag("force", rootCmd.PersistentFlags().Lookup("force"))
 
 	// Bind environment variables to some flags
 	viper.BindEnv("dsn", "MPAT_DSN")

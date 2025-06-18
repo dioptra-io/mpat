@@ -169,3 +169,24 @@ func (a *SQLClient) HealthCheck() error {
 	}
 	return nil
 }
+
+func (a *SQLClient) TableEmpty(tableName string) (bool, error) {
+	query := `
+SELECT count() = 0 AS table_empty 
+FROM system.tables 
+WHERE database = '%s' AND name = '%s'
+;` // end of the query
+
+	formattedQuery := fmt.Sprintf(
+		query,
+		a.Database(),
+		tableName,
+	)
+
+	var tableEmpty bool
+	if err := a.QueryRow(formattedQuery).Scan(&tableEmpty); err != nil {
+		return false, err
+	} else {
+		return tableEmpty, nil
+	}
+}

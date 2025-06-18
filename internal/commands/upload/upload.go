@@ -65,6 +65,7 @@ func uploadIrisResultsCmd(cmd *cobra.Command, args []string) {
 		logger.Printf("Upload command requires at least 2 arguments, got %d", len(args))
 		return
 	}
+	force := viper.GetBool("force")
 	destinationDSNString := viper.GetString("dsn")
 	sourceDSNString := viper.GetString("source-dsn")
 	onlyIPv4Measurements := viper.GetBool("ipv4")
@@ -106,6 +107,14 @@ func uploadIrisResultsCmd(cmd *cobra.Command, args []string) {
 
 	logger.Println("Database health check positive.")
 
+	if tableEmpty, err := destinationClient.TableEmpty(destinationTableName); err != nil {
+		logger.Errorf("Destination ClickHouse database table check failed: %v.\n", err)
+		return
+	} else if !tableEmpty && !force {
+		logger.Println("Non-empty table exists in the destination, try --force flag.")
+		return
+	}
+
 	destinationManager := pipeline.NewClickHouseManager[v3.IrisResultsRow](destinationClient)
 	err = destinationManager.DeleteThenCreate(true, &queries.BasicDeleteQuery{
 		TableName:       destinationTableName,
@@ -115,7 +124,8 @@ func uploadIrisResultsCmd(cmd *cobra.Command, args []string) {
 		AddCheckIfNotExists: true,
 	})
 	if err != nil {
-		panic(err)
+		logger.Errorf("Destination ClickHouse database table reset failed: %v.\n", err)
+		return
 	}
 
 	sourceStreamer := pipeline.NewClickHouseStreamer[v3.IrisResultsRow](sourceClient)
@@ -143,6 +153,7 @@ func uploadArkResultsCmd(cmd *cobra.Command, args []string) {
 		logger.Printf("Upload command requires at exactly 2 arguments, got %d", len(args))
 		return
 	}
+	force := viper.GetBool("force")
 	destinationDSNString := viper.GetString("dsn")
 	arkUser := viper.GetString("ark-user")
 	arkPassword := viper.GetString("ark-password")
@@ -161,6 +172,14 @@ func uploadArkResultsCmd(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	if tableEmpty, err := destinationClient.TableEmpty(destinationTableName); err != nil {
+		logger.Errorf("Destination ClickHouse database table check failed: %v.\n", err)
+		return
+	} else if !tableEmpty && !force {
+		logger.Println("Non-empty table exists in the destination, try --force flag.")
+		return
+	}
+
 	sourceClient, err := clientv2.NewArkClient(arkUser, arkPassword)
 	if err != nil {
 		logger.Errorf("Ark client connection failed: %v.\n", err)
@@ -168,7 +187,7 @@ func uploadArkResultsCmd(cmd *cobra.Command, args []string) {
 	}
 
 	destinationManager := pipeline.NewClickHouseManager[v3.IrisResultsRow](destinationClient)
-	err = destinationManager.DeleteThenCreate(true, &queries.BasicDeleteQuery{
+	err = destinationManager.DeleteThenCreate(force, &queries.BasicDeleteQuery{
 		TableName:       destinationTableName,
 		AddCheckIfExist: true,
 	}, &queries.BasicCreateQuery{
@@ -176,7 +195,8 @@ func uploadArkResultsCmd(cmd *cobra.Command, args []string) {
 		AddCheckIfNotExists: true,
 	})
 	if err != nil {
-		panic(err)
+		logger.Errorf("Destination ClickHouse database table reset failed: %v.\n", err)
+		return
 	}
 
 	sourceStreamer := pipeline.NewArkStreamer(sourceClient)
@@ -186,6 +206,8 @@ func uploadArkResultsCmd(cmd *cobra.Command, args []string) {
 	egressErrCh := destinationStreamer.Egress(ingestCh, ingestErrCh, &queries.BasicInsertQuery{
 		TableName: destinationTableName,
 	})
+
+	logger.Println("Started streaming data.")
 
 	for err := range egressErrCh {
 		logger.Errorf("An error occured while transfering data %v.\n", err)
