@@ -14,6 +14,8 @@ const (
 	DefaultMaxRetries                   = 5
 	DefaultStreamBufferSize             = 10000
 
+	DefaultHTTPSQLClientFormat = "CSV"
+
 	DefaultForcedResetFlag = false
 
 	DefaultExponentialBackupCap = time.Second * 10 // 10 seconds max
