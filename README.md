@@ -1,4 +1,7 @@
 # MPAT: Measurement Pipeline for Adaptive Tracing
+<p align="center">
+  <img src="assets/mpat-logo.png" alt="MPAT Logo" width="200"/>
+</p>
 
 MPAT is a high-performance command-line tool for enhancing Internet-scale route tracing measurements. It enables researchers and network operators to extract and analyze forwarding behavior from traceroute-like data and compute key metrics to assess the quality and coverage of measurements.
 
