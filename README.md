@@ -130,8 +130,4 @@ Each step can also be executed independently or integrated into a larger system 
 
 MIT License
 
-```
-
-Let me know if you'd like to generate a logo, examples, or the actual Go code structure next.
-```
 
