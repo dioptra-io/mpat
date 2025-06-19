@@ -36,10 +36,6 @@ func NewSQLClientWithHealthCheck(dsn string) (*SQLClient, error) {
 }
 
 func NewSQLClient(dsn string) (*SQLClient, error) {
-	db, err := sql.Open("clickhouse", dsn)
-	if err != nil {
-		return nil, err
-	}
 	parsedURL, err := url.Parse(dsn)
 	if err != nil {
 		return nil, err
@@ -56,6 +52,19 @@ func NewSQLClient(dsn string) (*SQLClient, error) {
 	if scheme == "tcp" {
 		host = strings.ReplaceAll(host, ":9000", ":8123")
 		scheme = "http"
+	}
+
+	// Set session timeout to 48h (172800s)
+	q := parsedURL.Query()
+	q.Set("max_execution_time", "10")
+	parsedURL.RawQuery = q.Encode()
+	parsedURL.Scheme = scheme
+	parsedURL.Host = host
+	dsn = parsedURL.String()
+
+	db, err := sql.Open("clickhouse", dsn)
+	if err != nil {
+		return nil, err
 	}
 
 	return &SQLClient{

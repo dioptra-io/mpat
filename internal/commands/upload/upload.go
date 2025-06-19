@@ -1,14 +1,17 @@
 package upload
 
 import (
+	"context"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"golang.org/x/sync/errgroup"
 
 	v1 "github.com/dioptra-io/ufuk-research/api/v1"
-	v3 "github.com/dioptra-io/ufuk-research/api/v3"
+	apiv3 "github.com/dioptra-io/ufuk-research/api/v3"
 	"github.com/dioptra-io/ufuk-research/internal/pipeline"
 	"github.com/dioptra-io/ufuk-research/internal/queries"
-	clientv2 "github.com/dioptra-io/ufuk-research/pkg/client/v2"
+	clientv3 "github.com/dioptra-io/ufuk-research/pkg/client/v3"
 	"github.com/dioptra-io/ufuk-research/pkg/util"
 )
 
@@ -71,13 +74,44 @@ func uploadIrisResultsCmd(cmd *cobra.Command, args []string) {
 	onlyIPv4Measurements := viper.GetBool("ipv4")
 	destinationTableName := args[1]
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	sourceDate, err := v1.ParseArkDate(args[0])
 	if err != nil {
 		logger.Errorf("Cannot parse given date: %v\n.", err)
 		return
 	}
 
-	irisClient, err := clientv2.NewIrisClientWithJWT()
+	destinationNativeClient, err := clientv3.NewNativeSQLClientWithPing(destinationDSNString)
+	if err != nil {
+		logger.Errorf("Destination ClickHouse database healthcheck failed: %v.\n", err)
+		return
+	}
+
+	destinationHTTPClient, err := clientv3.NewHTTPSQLClient(destinationDSNString)
+	if err != nil {
+		logger.Errorf("Destination ClickHouse database connection failed: %v.\n", err)
+		return
+	}
+
+	sourceHTTPClient, err := clientv3.NewHTTPSQLClient(sourceDSNString)
+	if err != nil {
+		logger.Errorf("Source ClickHouse database connection failed: %v.\n", err)
+		return
+	}
+
+	logger.Println("Database health check positive.")
+
+	if tableSize, err := destinationNativeClient.TableSize(ctx, destinationTableName); err != nil {
+		logger.Errorf("Destination ClickHouse database table check failed: %v.\n", err)
+		return
+	} else if tableSize > 0 && !force {
+		logger.Errorf("Non-empty table exists in the destination, try --force flag.")
+		return
+	}
+
+	irisClient, err := clientv3.NewIrisClientWithJWT()
 	if err != nil {
 		logger.Errorf("Iris client health check failed: %v\n.", err)
 		return
@@ -93,54 +127,49 @@ func uploadIrisResultsCmd(cmd *cobra.Command, args []string) {
 
 	logger.Debugf("Running command with %d source tables.\n", len(sourceTableNames))
 
-	destinationClient, err := clientv2.NewSQLClientWithHealthCheck(destinationDSNString)
-	if err != nil {
-		logger.Errorf("Destination ClickHouse database healthcheck failed: %v.\n", err)
-		return
-	}
-
-	sourceClient, err := clientv2.NewSQLClientWithHealthCheck(sourceDSNString)
-	if err != nil {
-		logger.Errorf("Source ClickHouse database healthcheck failed: %v.\n", err)
-		return
-	}
-
-	logger.Println("Database health check positive.")
-
-	if tableEmpty, err := destinationClient.TableEmpty(destinationTableName); err != nil {
-		logger.Errorf("Destination ClickHouse database table check failed: %v.\n", err)
-		return
-	} else if !tableEmpty && !force {
-		logger.Println("Non-empty table exists in the destination, try --force flag.")
-		return
-	}
-
-	destinationManager := pipeline.NewClickHouseManager[v3.IrisResultsRow](destinationClient)
-	err = destinationManager.DeleteThenCreate(true, &queries.BasicDeleteQuery{
+	destinationManager := pipeline.NewClickHouseManager[apiv3.IrisResultsRow](ctx, destinationNativeClient)
+	err = destinationManager.DeleteThenCreate(&queries.BasicDeleteQuery{
 		TableName:       destinationTableName,
 		AddCheckIfExist: true,
+		Database:        destinationNativeClient.Database,
 	}, &queries.BasicCreateQuery{
 		TableName:           destinationTableName,
 		AddCheckIfNotExists: true,
+		Database:            destinationNativeClient.Database,
+		Object:              apiv3.IrisResultsRow{},
 	})
 	if err != nil {
 		logger.Errorf("Destination ClickHouse database table reset failed: %v.\n", err)
 		return
 	}
 
-	sourceStreamer := pipeline.NewClickHouseStreamer[v3.IrisResultsRow](sourceClient)
-	ingestCh, ingestErrCh := sourceStreamer.Ingest(&queries.BasicSelectQuery{
+	sourceStreamer := pipeline.NewClickHouseReaderStreamer(ctx, sourceHTTPClient)
+	reader, err := sourceStreamer.Ingest(&queries.BasicSelectStartQuery{
 		TableNames: sourceTableNames,
+		Database:   sourceHTTPClient.Database,
 	})
+	if err != nil {
+		logger.Errorf("Failed to call ingress: %v.\n", err)
+		return
+	}
 
-	destinationStreamer := pipeline.NewClickHouseStreamer[v3.IrisResultsRow](destinationClient)
-	egressErrCh := destinationStreamer.Egress(ingestCh, ingestErrCh, &queries.BasicInsertQuery{
+	destinationStreamer := pipeline.NewClickHouseReaderStreamer(ctx, destinationHTTPClient)
+	err = destinationStreamer.Egress(reader, &queries.BasicInsertStartQuery{
 		TableName: destinationTableName,
+		Database:  destinationHTTPClient.Database,
 	})
+	if err != nil {
+		logger.Errorf("Failed to call ingress: %v.\n", err)
+		return
+	}
 
-	logger.Println("Started streaming data.")
+	logger.Println("Started streaming.")
 
-	for err := range egressErrCh {
+	var topGroup errgroup.Group
+	topGroup.Go(sourceStreamer.G.Wait)
+	topGroup.Go(destinationStreamer.G.Wait)
+
+	if err := topGroup.Wait(); err != nil {
 		logger.Errorf("An error occured while transfering data %v.\n", err)
 		return
 	}
@@ -159,6 +188,10 @@ func uploadArkResultsCmd(cmd *cobra.Command, args []string) {
 	arkPassword := viper.GetString("ark-password")
 	destinationTableName := args[1]
 	sourceDate, err := util.ParseDateTime(args[0])
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	if err != nil {
 		logger.Errorf("Given date is not in format 'YYYY-MM-DD': %s.\n", args[1])
 		return
@@ -166,53 +199,60 @@ func uploadArkResultsCmd(cmd *cobra.Command, args []string) {
 
 	logger.Debugf("Running command for date %s source tables.\n", args[1])
 
-	destinationClient, err := clientv2.NewSQLClientWithHealthCheck(destinationDSNString)
+	destinationClient, err := clientv3.NewNativeSQLClientWithPing(destinationDSNString)
 	if err != nil {
 		logger.Errorf("Destination ClickHouse database heathcheck failed: %v.\n", err)
 		return
 	}
 
-	if tableEmpty, err := destinationClient.TableEmpty(destinationTableName); err != nil {
+	if tableSize, err := destinationClient.TableSize(ctx, destinationTableName); err != nil {
 		logger.Errorf("Destination ClickHouse database table check failed: %v.\n", err)
 		return
-	} else if !tableEmpty && !force {
-		logger.Println("Non-empty table exists in the destination, try --force flag.")
+	} else if tableSize > 0 && !force {
+		logger.Errorf("Non-empty table exists in the destination, try --force flag.")
 		return
 	}
 
-	sourceClient, err := clientv2.NewArkClient(arkUser, arkPassword)
+	sourceClient, err := clientv3.NewArkClient(arkUser, arkPassword)
 	if err != nil {
 		logger.Errorf("Ark client connection failed: %v.\n", err)
 		return
 	}
 
-	destinationManager := pipeline.NewClickHouseManager[v3.IrisResultsRow](destinationClient)
-	err = destinationManager.DeleteThenCreate(force, &queries.BasicDeleteQuery{
+	destinationManager := pipeline.NewClickHouseManager[apiv3.IrisResultsRow](ctx, destinationClient)
+	err = destinationManager.DeleteThenCreate(&queries.BasicDeleteQuery{
 		TableName:       destinationTableName,
 		AddCheckIfExist: true,
+		Database:        destinationClient.Database,
 	}, &queries.BasicCreateQuery{
 		TableName:           destinationTableName,
 		AddCheckIfNotExists: true,
+		Database:            destinationClient.Database,
+		Object:              apiv3.IrisResultsRow{},
 	})
 	if err != nil {
 		logger.Errorf("Destination ClickHouse database table reset failed: %v.\n", err)
 		return
 	}
 
-	sourceStreamer := pipeline.NewArkStreamer(sourceClient)
-	ingestCh, ingestErrCh := sourceStreamer.Ingest(sourceDate)
+	sourceStreamer := pipeline.NewArkStreamer(ctx, sourceClient)
+	ingestCh := sourceStreamer.Ingest(sourceDate, 1)
 
-	destinationStreamer := pipeline.NewClickHouseStreamer[v3.IrisResultsRow](destinationClient)
-	egressErrCh := destinationStreamer.Egress(ingestCh, ingestErrCh, &queries.BasicInsertQuery{
+	destinationStreamer := pipeline.NewClickHouseRowStreamer[apiv3.IrisResultsRow](ctx, destinationClient)
+	destinationStreamer.Egress(ingestCh, &queries.BasicInsertQuery{
 		TableName: destinationTableName,
-	})
+		Database:  destinationClient.Database,
+		Object:    apiv3.IrisResultsRow{},
+	}, 1)
 
-	logger.Println("Started streaming data.")
+	logger.Println("Started streaming.")
 
-	for err := range egressErrCh {
+	var topGroup errgroup.Group
+	topGroup.Go(sourceStreamer.G.Wait)
+	// topGroup.Go(destinationStreamer.G.Wait)
+
+	if err := topGroup.Wait(); err != nil {
 		logger.Errorf("An error occured while transfering data %v.\n", err)
 		return
 	}
-
-	logger.Println("Done!")
 }

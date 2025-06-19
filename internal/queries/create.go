@@ -5,20 +5,19 @@ import (
 	"fmt"
 
 	v3 "github.com/dioptra-io/ufuk-research/api/v3"
-	clientv2 "github.com/dioptra-io/ufuk-research/pkg/client/v2"
 )
 
 type BasicCreateQuery struct {
 	TableName           string
 	AddCheckIfNotExists bool
-	client              *clientv2.SQLClient
-	object              any
+	Database            string
+	Object              any
 }
 
 func (q *BasicCreateQuery) Query() (string, error) {
 	query := ""
 
-	switch q.object.(type) {
+	switch q.Object.(type) {
 	case v3.IrisResultsRow:
 		query = CreateIrisResultsRowQuery
 	default:
@@ -33,14 +32,9 @@ func (q *BasicCreateQuery) Query() (string, error) {
 	return fmt.Sprintf(
 		query,
 		notExistsCheck,
-		q.client.Database(),
+		q.Database,
 		q.TableName,
 	), nil
-}
-
-func (q *BasicCreateQuery) Set(client *clientv2.SQLClient, obj any) {
-	q.client = client
-	q.object = obj
 }
 
 const CreateIrisResultsRowQuery = `

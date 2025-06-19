@@ -1,174 +1,137 @@
 package pipeline
 
 import (
-	"database/sql"
 	"fmt"
+
+	"golang.org/x/net/context"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/dioptra-io/ufuk-research/cmd/orm"
 	"github.com/dioptra-io/ufuk-research/internal/queries"
-	clientv2 "github.com/dioptra-io/ufuk-research/pkg/client/v2"
+	clientv3 "github.com/dioptra-io/ufuk-research/pkg/client/v3"
 	"github.com/dioptra-io/ufuk-research/pkg/config"
 )
 
-type ClickHouseStreamer[T any] struct {
-	BufferSize      int
-	EgressChunkSize int
-
-	client *clientv2.SQLClient
+type ClickHouseRowStreamer[T any] struct {
+	bufferSize      int
+	egressChunkSize int
+	client          *clientv3.NativeSQLClient
+	G               *errgroup.Group
+	ctx             context.Context
 }
 
-func NewClickHouseStreamer[T any](client *clientv2.SQLClient) *ClickHouseStreamer[T] {
-	return &ClickHouseStreamer[T]{
+func NewClickHouseRowStreamer[T any](ctx context.Context, client *clientv3.NativeSQLClient) *ClickHouseRowStreamer[T] {
+	g, ctx := errgroup.WithContext(ctx)
+
+	return &ClickHouseRowStreamer[T]{
+		bufferSize:      config.DefaultStreamBufferSize,
+		egressChunkSize: config.DefaultUploadChunkSize,
 		client:          client,
-		BufferSize:      config.DefaultStreamBufferSize,
-		EgressChunkSize: config.DefaultUploadChunkSize,
+		G:               g,
+		ctx:             ctx,
 	}
 }
 
-func (s *ClickHouseStreamer[T]) Ingest(q queries.Query) (<-chan *T, <-chan error) {
-	objCh := make(chan *T, s.BufferSize)
-	errCh := make(chan error, 1)
+func (s *ClickHouseRowStreamer[T]) Ingest(q queries.Query) <-chan *T {
+	objCh := make(chan *T, s.bufferSize)
 
-	go func() {
+	s.G.Go(func() error {
 		defer close(objCh)
-		defer close(errCh)
-		var obj T
 
-		q.Set(s.client, obj)
 		query, err := q.Query()
 		if err != nil {
-			errCh <- fmt.Errorf("streamer ingest query generation failed: %w", err)
-			return
+			return fmt.Errorf("streamer ingest query generation failed: %w", err)
 		}
 
-		rows, err := s.client.Query(query)
+		rows, err := s.client.Query(s.ctx, query)
 		if err != nil {
-			errCh <- fmt.Errorf("streamer ingest query invokation filed: %w", err)
-			return
+			return fmt.Errorf("streamer ingest query invokation filed: %w", err)
 		}
 
 		defer rows.Close()
 
 		for rows.Next() {
+			select {
+			case <-s.ctx.Done():
+				return s.ctx.Err()
+			default:
+			}
+
 			objPointer := new(T)
 			scannableFieldPointers, err := orm.GetFieldPointers(objPointer)
 			if err != nil {
-				errCh <- fmt.Errorf("streamer ingest field pointer computation failed: %w", err)
-				return
+				return fmt.Errorf("streamer ingest field pointer computation failed: %w", err)
 			}
 
 			if err := rows.Err(); err != nil {
-				errCh <- fmt.Errorf("streamer ingest row iteration failed: %w", err)
-				return
+				return fmt.Errorf("streamer ingest row iteration failed: %w", err)
 			}
 
 			if err := rows.Scan(scannableFieldPointers...); err != nil {
-				errCh <- fmt.Errorf("streamer ingest row scan failed: %w", err)
-				return
+				return fmt.Errorf("streamer ingest row scan failed: %w", err)
 			}
 
 			objCh <- objPointer
 		}
-	}()
+		return nil
+	})
 
-	return objCh, errCh
+	return objCh
 }
 
-func (s *ClickHouseStreamer[T]) Egress(objCh <-chan *T, errCh <-chan error, q queries.Query) <-chan error {
-	errCh2 := make(chan error, 1)
-
-	go func() {
-		defer close(errCh2)
-		var tx *sql.Tx
-		var stmt *sql.Stmt
-		var err error
-		var obj T
-
-		q.Set(s.client, obj)
-		query, err := q.Query()
-		if err != nil {
-			errCh2 <- fmt.Errorf("streamer egress query invokation failed: %w", err)
-			return
-		}
-
-		beginTx := func() error {
-			tx, err = s.client.Begin()
+func (s *ClickHouseRowStreamer[T]) Egress(objCh <-chan *T, q queries.Query, uploadWorkers int) {
+	for i := 0; i < uploadWorkers; i++ {
+		s.G.Go(func() error {
+			query, err := q.Query()
 			if err != nil {
-				return fmt.Errorf("streamer egress begin transaction failed: %w", err)
+				return fmt.Errorf("streamer egress query invocation failed: %w", err)
 			}
 
-			stmt, err = tx.Prepare(query)
+			batch, err := s.client.PrepareBatch(s.ctx, query)
 			if err != nil {
-				return fmt.Errorf("streamer egress prepare insert failed: %w", err)
+				return err
 			}
+
+			counter := 0
+
+			for obj := range objCh {
+				select {
+				case <-s.ctx.Done():
+					return s.ctx.Err()
+				default:
+				}
+
+				counter++
+
+				insertableFields, err := orm.GetInsertableFields(obj)
+				if err != nil {
+					return fmt.Errorf("streamer egress insertable field computation failed: %w", err)
+				}
+
+				if err := batch.Append(insertableFields...); err != nil {
+					return fmt.Errorf("streamer egress batch append failed: %w", err)
+				}
+
+				if counter%s.egressChunkSize == 0 {
+					if err := batch.Send(); err != nil {
+						return fmt.Errorf("sending batch send function: %w", err)
+					}
+
+					batch, err = s.client.PrepareBatch(s.ctx, query)
+					if err != nil {
+						return err
+					}
+				}
+
+			}
+
+			if counter%s.egressChunkSize != 0 {
+				if err := batch.Send(); err != nil {
+					return fmt.Errorf("sending batch send function: %w", err)
+				}
+			}
+
 			return nil
-		}
-
-		commitTx := func() error {
-			if stmt != nil {
-				stmt.Close()
-			}
-			if tx != nil {
-				if err := tx.Commit(); err != nil {
-					return fmt.Errorf("streamer egress commit failed: %w", err)
-				}
-			}
-			return nil
-		}
-
-		if err := beginTx(); err != nil {
-			errCh2 <- err
-			return
-		}
-
-		counter := 0
-
-		for obj := range objCh {
-			counter++
-			insertableFields, err := orm.GetInsertableFields(obj)
-			if err != nil {
-				errCh2 <- fmt.Errorf("streamer egress insertable field computation failed: %w", err)
-				return
-			}
-
-			if _, err := stmt.Exec(insertableFields...); err != nil {
-				errCh2 <- fmt.Errorf("streamer egress insert exec failed: %w", err)
-				return
-			}
-
-			if counter%s.EgressChunkSize == 0 {
-				// Commit current chunk
-				if err := commitTx(); err != nil {
-					errCh2 <- err
-					return
-				}
-				// Start new transaction
-				if err := beginTx(); err != nil {
-					errCh2 <- err
-					return
-				}
-			}
-
-			select {
-			case err := <-errCh:
-				errCh2 <- err
-				return
-			default:
-			}
-		}
-
-		if err := commitTx(); err != nil {
-			errCh2 <- err
-			return
-		}
-
-		select {
-		case err := <-errCh:
-			errCh2 <- err
-			return
-		default:
-		}
-	}()
-
-	return errCh2
+		})
+	}
 }

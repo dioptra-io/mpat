@@ -5,13 +5,12 @@ import (
 	"strings"
 
 	"github.com/dioptra-io/ufuk-research/cmd/orm"
-	clientv2 "github.com/dioptra-io/ufuk-research/pkg/client/v2"
 )
 
 type BasicInsertQuery struct {
 	TableName string
-	client    *clientv2.SQLClient
-	object    any
+	Database  string
+	Object    any
 }
 
 func (q *BasicInsertQuery) Query() (string, error) {
@@ -23,7 +22,7 @@ VALUES
     (%s)
 ;` // end of the query
 
-	fieldNames, err := orm.GetInsertableFieldJSONTags(q.object)
+	fieldNames, err := orm.GetInsertableFieldJSONTags(q.Object)
 	if err != nil {
 		return "", err
 	}
@@ -35,14 +34,24 @@ VALUES
 
 	return fmt.Sprintf(
 		query,
-		q.client.Database(),
+		q.Database,
 		q.TableName,
 		strings.Join(fieldNames, ", "),
 		strings.Join(placeholders, ", "),
 	), nil
 }
 
-func (q *BasicInsertQuery) Set(client *clientv2.SQLClient, obj any) {
-	q.client = client
-	q.object = obj
+type BasicInsertStartQuery struct {
+	TableName string
+	Database  string
+}
+
+func (q *BasicInsertStartQuery) Query() (string, error) {
+	query := `INSERT INTO %s.%s FORMAT CSVWithNames` // end of the query
+
+	return fmt.Sprintf(
+		query,
+		q.Database,
+		q.TableName,
+	), nil
 }
