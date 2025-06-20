@@ -12,6 +12,7 @@ import (
 	"github.com/dioptra-io/ufuk-research/internal/pipeline"
 	"github.com/dioptra-io/ufuk-research/internal/queries"
 	clientv3 "github.com/dioptra-io/ufuk-research/pkg/client/v3"
+	"github.com/dioptra-io/ufuk-research/pkg/config"
 	"github.com/dioptra-io/ufuk-research/pkg/util"
 )
 
@@ -46,8 +47,10 @@ func UpoadCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(2),
 		Run:   uploadArkResultsCmd,
 	}
+	uploadArkResultsCmd.Flags().IntP("parallel-downloads", "w", config.DefaultNumParallelArkDownloads, "number of parallel downloads")
 	uploadArkResultsCmd.Flags().String("ark-user", "", "username for the ark database")
 	uploadArkResultsCmd.Flags().String("ark-password", "", "password for the ark database")
+	viper.BindPFlag("parallel-downloads", uploadArkResultsCmd.Flags().Lookup("parallel-downloads"))
 	viper.BindPFlag("ark-user", uploadArkResultsCmd.Flags().Lookup("ark-user"))
 	viper.BindPFlag("ark-password", uploadArkResultsCmd.Flags().Lookup("ark-password"))
 	viper.BindEnv("ark-user", "MPAT_ARK_API_USER")
@@ -190,6 +193,7 @@ func uploadArkResultsCmd(cmd *cobra.Command, args []string) {
 	destinationDSNString := viper.GetString("dsn")
 	arkUser := viper.GetString("ark-user")
 	arkPassword := viper.GetString("ark-password")
+	parallelWorkers := viper.GetInt("parallel-downloads")
 	destinationTableName := args[1]
 	sourceDate, err := util.ParseDateTime(args[0])
 
@@ -240,7 +244,7 @@ func uploadArkResultsCmd(cmd *cobra.Command, args []string) {
 	}
 
 	sourceStreamer := pipeline.NewArkStreamer(ctx, sourceArkClient)
-	ingestCh := sourceStreamer.Ingest(sourceDate, 1)
+	ingestCh := sourceStreamer.Ingest(sourceDate, parallelWorkers)
 
 	destinationStreamer := pipeline.NewClickHouseRowStreamer[apiv3.IrisResultsRow](ctx, destinationClient)
 	destinationStreamer.Egress(ingestCh, &queries.BasicInsertQuery{

@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -33,6 +34,7 @@ func NewArkStreamer(ctx context.Context, client *clientv3.ArkClient) *ArkStreame
 func (s *ArkStreamer) Ingest(t time.Time, numParalel int) <-chan *apiv3.IrisResultsRow {
 	outCh := make(chan *apiv3.IrisResultsRow, s.bufferSize)
 	s.G.SetLimit(numParalel + 1)
+	var counter int64 = 0
 
 	s.G.Go(func() error {
 		urls, err := s.client.GetWartURLs(s.ctx, t)
@@ -40,7 +42,7 @@ func (s *ArkStreamer) Ingest(t time.Time, numParalel int) <-chan *apiv3.IrisResu
 			return err
 		}
 
-		for i, url := range urls {
+		for _, url := range urls {
 			s.G.Go(func() error {
 				currentCh, err := s.client.StreamIrisResultsRows(s.ctx, url)
 				if err != nil {
@@ -56,7 +58,8 @@ func (s *ArkStreamer) Ingest(t time.Time, numParalel int) <-chan *apiv3.IrisResu
 				}
 
 				splitUrl := strings.Split(url, "/")
-				logger.Printf("Finished upload for wart file (%d/%d): %s.\n", i+1, len(urls), splitUrl[len(splitUrl)-1])
+				atomic.AddInt64(&counter, 1) // no race cond
+				logger.Printf("Finished upload for wart file (%d/%d): %s.\n", counter, len(urls), splitUrl[len(splitUrl)-1])
 				return nil
 			})
 		}
