@@ -143,35 +143,39 @@ func uploadIrisResultsCmd(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	sourceStreamer := pipeline.NewClickHouseReaderStreamer(ctx, sourceHTTPClient)
-	reader, err := sourceStreamer.Ingest(&queries.BasicSelectStartQuery{
-		TableNames: sourceTableNames,
-		Database:   sourceHTTPClient.Database,
-	})
-	if err != nil {
-		logger.Errorf("Failed to call ingress: %v.\n", err)
-		return
-	}
+	for i, tableName := range sourceTableNames {
+		sourceStreamer := pipeline.NewClickHouseReaderStreamer(ctx, sourceHTTPClient)
+		reader, err := sourceStreamer.Ingest(&queries.BasicSelectStartQuery{
+			TableNames: []string{tableName}, // quick fix
+			Database:   sourceHTTPClient.Database,
+		})
+		if err != nil {
+			logger.Errorf("Failed to call ingress: %v.\n", err)
+			return
+		}
 
-	destinationStreamer := pipeline.NewClickHouseReaderStreamer(ctx, destinationHTTPClient)
-	err = destinationStreamer.Egress(reader, &queries.BasicInsertStartQuery{
-		TableName: destinationTableName,
-		Database:  destinationHTTPClient.Database,
-	})
-	if err != nil {
-		logger.Errorf("Failed to call ingress: %v.\n", err)
-		return
-	}
+		destinationStreamer := pipeline.NewClickHouseReaderStreamer(ctx, destinationHTTPClient)
+		err = destinationStreamer.Egress(reader, &queries.BasicInsertStartQuery{
+			TableName: destinationTableName,
+			Database:  destinationHTTPClient.Database,
+		})
+		if err != nil {
+			logger.Errorf("Failed to call ingress: %v.\n", err)
+			return
+		}
 
-	logger.Println("Started streaming.")
+		logger.Println("Started streaming.")
 
-	var topGroup errgroup.Group
-	topGroup.Go(sourceStreamer.G.Wait)
-	topGroup.Go(destinationStreamer.G.Wait)
+		var topGroup errgroup.Group
+		topGroup.Go(sourceStreamer.G.Wait)
+		topGroup.Go(destinationStreamer.G.Wait)
 
-	if err := topGroup.Wait(); err != nil {
-		logger.Errorf("An error occured while transfering data %v.\n", err)
-		return
+		if err := topGroup.Wait(); err != nil {
+			logger.Errorf("An error occured while transfering data %v.\n", err)
+			return
+		}
+
+		logger.Printf("Transfered table (%d/%d): %s", i, len(sourceTableNames), tableName)
 	}
 
 	logger.Println("Done!")
