@@ -12,7 +12,9 @@ const (
 	DefaultMaxRowUploadRate             = 0 // limitless
 	DefaultSkipDuplicateIPs             = false
 	DefaultMaxRetries                   = 5
-	DefaultStreamBufferSize             = 10000
+	DefaultStreamBufferSize             = 1000000
+
+	DefaultNumParallelArkDownloads = 8
 
 	DefaultHTTPSQLClientFormat = "CSV"
 
