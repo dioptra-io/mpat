@@ -43,7 +43,7 @@ func (c *ArkClient) GetArkCycles(ctx context.Context, dates []apiv1.Date) ([]api
 	return arkCycles, nil
 }
 
-func (c *ArkClient) GetWartFiles(ctx context.Context, t time.Time) ([]string, error) {
+func (c *ArkClient) GetWartURLs(ctx context.Context, t time.Time) ([]string, error) {
 	arkWartFiles := make([]string, 0)
 
 	req, err := http.NewRequest("GET", getCycleURL(t), nil)
@@ -93,7 +93,7 @@ func getCycleURL(t time.Time) string {
 	return fmt.Sprintf("%s/%d/%s", config.DefaultArkIPv4DatabaseBaseURL, t.Year(), getCycleString(t))
 }
 
-func (c *ArkClient) DownloadRouteTraces(ctx context.Context, wartURL string) (<-chan *v3.IrisResultsRow, error) {
+func (c *ArkClient) StreamIrisResultsRows(ctx context.Context, wartURL string) (<-chan *v3.IrisResultsRow, error) {
 	wartReader, err := newWartReader(ctx, wartURL, c.username, c.password)
 	if err != nil {
 		return nil, err

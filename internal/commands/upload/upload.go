@@ -175,7 +175,7 @@ func uploadIrisResultsCmd(cmd *cobra.Command, args []string) {
 			return
 		}
 
-		logger.Printf("Transfered table (%d/%d): %s", i, len(sourceTableNames), tableName)
+		logger.Printf("Transfered table (%d/%d): %s", i+1, len(sourceTableNames), tableName)
 	}
 
 	logger.Println("Done!")
@@ -217,7 +217,7 @@ func uploadArkResultsCmd(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	sourceClient, err := clientv3.NewArkClient(arkUser, arkPassword)
+	sourceArkClient, err := clientv3.NewArkClient(arkUser, arkPassword)
 	if err != nil {
 		logger.Errorf("Ark client connection failed: %v.\n", err)
 		return
@@ -239,7 +239,7 @@ func uploadArkResultsCmd(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	sourceStreamer := pipeline.NewArkStreamer(ctx, sourceClient)
+	sourceStreamer := pipeline.NewArkStreamer(ctx, sourceArkClient)
 	ingestCh := sourceStreamer.Ingest(sourceDate, 1)
 
 	destinationStreamer := pipeline.NewClickHouseRowStreamer[apiv3.IrisResultsRow](ctx, destinationClient)
@@ -253,7 +253,7 @@ func uploadArkResultsCmd(cmd *cobra.Command, args []string) {
 
 	var topGroup errgroup.Group
 	topGroup.Go(sourceStreamer.G.Wait)
-	// topGroup.Go(destinationStreamer.G.Wait)
+	topGroup.Go(destinationStreamer.G.Wait)
 
 	if err := topGroup.Wait(); err != nil {
 		logger.Errorf("An error occured while transfering data %v.\n", err)

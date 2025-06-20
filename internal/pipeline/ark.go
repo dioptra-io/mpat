@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -31,16 +32,17 @@ func NewArkStreamer(ctx context.Context, client *clientv3.ArkClient) *ArkStreame
 
 func (s *ArkStreamer) Ingest(t time.Time, numParalel int) <-chan *apiv3.IrisResultsRow {
 	outCh := make(chan *apiv3.IrisResultsRow, s.bufferSize)
+	s.G.SetLimit(numParalel + 1)
 
 	s.G.Go(func() error {
-		urls, err := s.client.GetWartFiles(s.ctx, t)
+		urls, err := s.client.GetWartURLs(s.ctx, t)
 		if err != nil {
 			return err
 		}
 
-		for _, url := range urls {
+		for i, url := range urls {
 			s.G.Go(func() error {
-				currentCh, err := s.client.DownloadRouteTraces(s.ctx, url)
+				currentCh, err := s.client.StreamIrisResultsRows(s.ctx, url)
 				if err != nil {
 					return err
 				}
@@ -52,6 +54,9 @@ func (s *ArkStreamer) Ingest(t time.Time, numParalel int) <-chan *apiv3.IrisResu
 					case outCh <- obj:
 					}
 				}
+
+				splitUrl := strings.Split(url, "/")
+				logger.Printf("Finished upload for wart file (%d/%d): %s.\n", i+1, len(urls), splitUrl[len(splitUrl)-1])
 				return nil
 			})
 		}
