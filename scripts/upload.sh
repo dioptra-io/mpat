@@ -2,15 +2,17 @@
 
 set -euo pipefail
 
-DATES=("2025-05-01" "2025-05-02" "2025-05-03" "2025-05-04" "2025-05-05" "2025-05-06" "2025-05-07")
+DATES=()
+DATEFILE=""
 DRYRUN=false
+MODE="iris"
 
 mpat_command() {
     if $DRYRUN; then
-        echo "[dry-run] mpat upload $*"
+        log "[dry-run] mpat $*"
         sleep 1
     else
-        mpat "$@"
+        mpat "$@" || true
     fi
 }
 
@@ -22,55 +24,89 @@ upload_for_date() {
     local date="$1"
     local datestr="${date//-/}"
 
-    mpat_command upload iris-results "$date" "iris4__${datestr}" &
-    local iris_pid=$!
+    log "Uploading ${MODE}4__${datestr}..."
+    mpat_command upload "${MODE}-results" "$date" "${MODE}4__${datestr}"
+    local command_status=$?
 
-    mpat_command upload ark-results "$date" "ark4__${datestr}" &
-    local ark_pid=$!
-
-    log "Started uploading tables iris4__${datestr} (pid: ${iris_pid}) and ark4__${datestr} (pid: ${ark_pid})"
-
-    wait "$iris_pid"
-    local iris_status=$?
-    if [[ $iris_status -ne 0 ]]; then
-        log "iris4__${datestr} failed with code ${iris_status}" >&2
-    fi
-
-    wait "$ark_pid"
-    local ark_status=$?
-    if [[ $ark_status -ne 0 ]]; then
-        log "ark4__${datestr} failed with code ${ark_status}" >&2
+    if [[ $command_status -ne 0 ]]; then
+        log "${MODE}4__${datestr} failed with code ${command_status}" >&2
     fi
 }
 
 parse_args() {
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
+    DRYRUN=false
+
+    for arg in "$@"; do
+        case "$arg" in
+            -h|--help)
+                print_help
+                exit 0
+                ;;
+        esac
+        case "$arg" in
             --dry-run)
                 DRYRUN=true
-                shift
-                ;;
-            *)
-                echo "Unknown argument: $1" >&2
-                exit 1
                 ;;
         esac
     done
+
+    local positional=()
+    for arg in "$@"; do
+        if [[ "$arg" != -* ]]; then
+            positional+=("$arg")
+        fi
+    done
+
+    if [[ ${#positional[@]} -lt 2 ]]; then
+        log "Error: not enough arguments" >&2
+        exit 1
+    fi
+
+    if [[ "$MODE" != "ark" && "$MODE" != "iris" ]]; then
+        log "Error: invalid mode '$MODE'. Expected 'ark' or 'iris'." >&2
+        exit 1
+    fi
+    
+    MODE="${positional[0]}"
+    DATEFILE="${positional[1]}"
+}
+
+read_dates() {
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && DATES+=("$line")
+    done < "$DATEFILE"
+}
+
+check_mpat_command() {
+    if ! command -v mpat &> /dev/null; then
+        log "Error: 'mpat' command not found." >&2
+        return 1
+    fi
+}
+
+print_help() {
+    cat <<EOF
+Usage: $0 <ark|iris> <datefile> [--dry-run]
+
+Arguments:
+  ark|iris       Required. Mode to use.
+  datefile       Required. Path to file with one date per line.
+  --dry-run      Optional. Simulates commands instead of running them.
+  -h, --help     Show this help message.
+
+Example:
+  $0 iris ./dates.txt --dry-run
+EOF
 }
 
 main() {
     parse_args "$@"
-
-    if ! command -v mpat &> /dev/null; then
-        echo "Error: 'mpat' command not found." >&2
-        return 1
-    fi
+    read_dates
 
     for date in "${DATES[@]}"; do
         upload_for_date "$date"
     done
 
-    wait
     log "All uploads completed"
 }
 
