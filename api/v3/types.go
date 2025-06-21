@@ -95,17 +95,18 @@ func (lt *IrisAPITime) UnmarshalJSON(b []byte) error {
 
 type GrouppedForwardingDecisionResultsRow struct {
 	// Info used in forwarding decision computation
-	CaptureTimestamp []time.Time `json:"capture_timestamp" mpat:"group_uniq_array"`
-	ProbeTTL         []uint8     `json:"probe_ttl"         mpat:"group_uniq_array"`
-	ReplySrcAddr     []net.IP    `json:"reply_src_addr"    mpat:"group_uniq_array"`
-	Round            []uint8     `json:"round"             mpat:"group_uniq_array"`
+	CaptureTimestamps []time.Time `json:"capture_timestamps" mpat:"group_uniq_array"`
+	ProbeTTLs         []uint8     `json:"probe_ttls"         mpat:"group_uniq_array"`
+	ReplySrcAddrs     []net.IP    `json:"reply_src_addrs"    mpat:"group_uniq_array"`
+	Rounds            []uint8     `json:"rounds"             mpat:"group_uniq_array"`
 
 	// FlowID
-	ProbeProtocol uint8  `json:"probe_protocol"`
-	ProbeSrcAddr  net.IP `json:"probe_src_addr"`
-	ProbeDstAddr  net.IP `json:"probe_dst_addr"`
-	ProbeSrcPort  uint16 `json:"probe_src_port"`
-	ProbeDstPort  uint16 `json:"probe_dst_port"`
+	ProbeProtocol  uint8  `json:"probe_protocol"`
+	ProbeSrcAddr   net.IP `json:"probe_src_addr"`
+	ProbeDstPrefix net.IP `json:"probe_dst_prefix"`
+	ProbeDstAddr   net.IP `json:"probe_dst_addr"`
+	ProbeSrcPort   uint16 `json:"probe_src_port"`
+	ProbeDstPort   uint16 `json:"probe_dst_port"`
 
 	// Other fields that are not used currently
 	// QuotedTTL              uint8       `json:"quoted_ttl"`
@@ -129,7 +130,6 @@ type GrouppedForwardingDecisionResultsRow struct {
 type ForwardingDecisionRow struct {
 	// Info used in forwarding decision computation
 	CaptureTimestamp time.Time `json:"capture_timestamp"`
-	ProbeDstPrefix   net.IP    `json:"probe_dst_prefix"`
 	NearRound        uint8     `json:"near_round"`
 	NearAddr         net.IP    `json:"near_addr"`
 	NearProbeTTL     uint8     `json:"near_probe_ttl"`
@@ -138,9 +138,10 @@ type ForwardingDecisionRow struct {
 	FarProbeTTL      uint8     `json:"far_probe_ttl"`
 
 	// FlowID
-	ProbeProtocol uint8  `json:"probe_protocol"`
-	ProbeSrcAddr  net.IP `json:"probe_src_addr"`
-	ProbeDstAddr  net.IP `json:"probe_dst_addr"`
-	ProbeSrcPort  uint16 `json:"probe_src_port"`
-	ProbeDstPort  uint16 `json:"probe_dst_port"`
+	ProbeProtocol  uint8  `json:"probe_protocol"`
+	ProbeSrcAddr   net.IP `json:"probe_src_addr"`
+	ProbeDstPrefix net.IP `json:"probe_dst_prefix"`
+	ProbeDstAddr   net.IP `json:"probe_dst_addr"`
+	ProbeSrcPort   uint16 `json:"probe_src_port"`
+	ProbeDstPort   uint16 `json:"probe_dst_port"`
 }

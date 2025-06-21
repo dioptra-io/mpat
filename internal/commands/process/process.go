@@ -79,9 +79,12 @@ func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
 	err = destinationManager.DeleteThenCreate(&queries.BasicDeleteQuery{
 		TableName:       destinationTableName,
 		AddCheckIfExist: true,
+		Database:        clickHouseClient.Database,
 	}, &queries.BasicCreateQuery{
 		TableName:           destinationTableName,
 		AddCheckIfNotExists: true,
+		Database:            clickHouseClient.Database,
+		Object:              v3.ForwardingDecisionRow{},
 	})
 	if err != nil {
 		logger.Errorf("ClickHouse database table reset failed: %v.\n", err)
@@ -89,8 +92,9 @@ func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
 	}
 
 	sourceStreamer := pipeline.NewClickHouseRowStreamer[v3.GrouppedForwardingDecisionResultsRow](ctx, clickHouseClient)
-	ingestCh := sourceStreamer.Ingest(&queries.BasicSelectQuery{
-		TableNames: []string{sourceTableName},
+	ingestCh := sourceStreamer.Ingest(&queries.GrouppedForwardingDecisionSelectQuery{
+		TableName: sourceTableName,
+		Database:  clickHouseClient.Database,
 	})
 
 	processStreamer := pipeline.NewForwardingDecisionProcessor(ctx, parallelWorkers, 1000)
@@ -99,7 +103,11 @@ func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
 	destinationStreamer := pipeline.NewClickHouseRowStreamer[v3.ForwardingDecisionRow](ctx, clickHouseClient)
 	destinationStreamer.Egress(processCh, &queries.BasicInsertQuery{
 		TableName: destinationTableName,
-	}, parallelWorkers)
+		Database:  clickHouseClient.Database,
+		Object:    v3.ForwardingDecisionRow{},
+	}, 1)
+
+	logger.Println("Started processing.")
 
 	var topGroup errgroup.Group
 	topGroup.Go(sourceStreamer.G.Wait)

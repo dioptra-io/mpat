@@ -20,6 +20,8 @@ func (q *BasicCreateQuery) Query() (string, error) {
 	switch q.Object.(type) {
 	case v3.IrisResultsRow:
 		query = CreateIrisResultsRowQuery
+	case v3.ForwardingDecisionRow:
+		query = CreateForwardingDecisionQuery
 	default:
 		return "", errors.New("cannot find the create query for type")
 	}
@@ -101,24 +103,21 @@ ENGINE MergeTree
 ORDER BY (probe_protocol, probe_src_addr, probe_dst_prefix, probe_dst_addr, probe_src_port, probe_dst_port, probe_ttl)
 ;`
 
-const CreateForwardingDecisionQueyr = `
-CREATE TABLE forwarding_decision (
-    -- important info
+const CreateForwardingDecisionQuery = `
+CREATE TABLE %s %s.%s (
     capture_timestamp  DateTime CODEC(T64, ZSTD(1)),
-    probe_dst_prefix   IPv6,
     near_round         UInt8,
     near_addr          IPv6,
     near_probe_ttl     UInt8,
     far_round          UInt8,
     far_addr           IPv6,
-    far_probe_ttl      UInt8
-
-    -- flowid
-    probe_protocol     UInt8,
+    far_probe_ttl      UInt8,
+    probe_protocol     UInt8, -- flowid
     probe_src_addr     IPv6,
+    probe_dst_prefix   IPv6,
     probe_dst_addr     IPv6,
     probe_src_port     UInt16,
-    probe_dst_port     UInt16,
+    probe_dst_port     UInt16
 ) ENGINE = MergeTree
 ORDER BY (near_addr, far_addr, probe_dst_prefix, capture_timestamp)
 ;`
