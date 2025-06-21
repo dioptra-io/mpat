@@ -25,7 +25,7 @@ func NewForwardingDecisionProcessor(ctx context.Context, numWorkers, bufferSize 
 	}
 }
 
-func (p *forwardingDecisionProcessor) Start(ingestCh <-chan *apiv3.IrisGroupedResultsRow) <-chan *apiv3.ForwardingDecisionRow {
+func (p *forwardingDecisionProcessor) Start(ingestCh <-chan *apiv3.GrouppedForwardingDecisionResultsRow) <-chan *apiv3.ForwardingDecisionRow {
 	outCh := make(chan *apiv3.ForwardingDecisionRow, p.bufferSize)
 
 	for i := 0; i < p.workers; i++ {
@@ -49,7 +49,7 @@ func (p *forwardingDecisionProcessor) Start(ingestCh <-chan *apiv3.IrisGroupedRe
 }
 
 // Dummy processing function
-func processItem(item *apiv3.IrisGroupedResultsRow, output chan<- *apiv3.ForwardingDecisionRow) error {
+func processItem(item *apiv3.GrouppedForwardingDecisionResultsRow, output chan<- *apiv3.ForwardingDecisionRow) error {
 	// Add your actual processing logic here
 	return nil
 }

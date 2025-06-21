@@ -13,6 +13,7 @@ const (
 	DefaultSkipDuplicateIPs             = false
 	DefaultMaxRetries                   = 5
 	DefaultStreamBufferSize             = 1000000
+	DefaultArkRetryWaitSeconds          = 20 // 20 seconds
 
 	DefaultNumParallelArkDownloads = 8
 

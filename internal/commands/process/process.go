@@ -88,7 +88,7 @@ func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	sourceStreamer := pipeline.NewClickHouseRowStreamer[v3.IrisGroupedResultsRow](ctx, clickHouseClient)
+	sourceStreamer := pipeline.NewClickHouseRowStreamer[v3.GrouppedForwardingDecisionResultsRow](ctx, clickHouseClient)
 	ingestCh := sourceStreamer.Ingest(&queries.BasicSelectQuery{
 		TableNames: []string{sourceTableName},
 	})
