@@ -46,7 +46,7 @@ func (s *ClickHouseReaderStreamer) Ingest(q queries.Query) (io.ReadCloser, error
 	// 	}
 	// 	defer reader.Close()
 	//
-	// 	if _, err := CopyWithContext(s.ctx, &buf, reader); err != nil {
+	// 	if _, err := CopyWithContext(s.ctx, &buf, reader);err != nil {
 	// 		return err
 	// 	}
 	//
