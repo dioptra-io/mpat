@@ -51,33 +51,37 @@ func (q *BasicSelectStartQuery) Query() (string, error) {
 	), nil
 }
 
-type GrouppedSelectQuery struct {
+type GrouppedForwardingDecisionSelectQuery struct {
 	TableNames []string
 	Database   string
-	Object     any
 }
 
-func (q *GrouppedSelectQuery) Query() (string, error) {
-	query := `
-SELECT
-    %s
-FROM
-    merge('%s', '(%s)')
-;` // end of the query
-
+func (q *GrouppedForwardingDecisionSelectQuery) Query() (string, error) {
+	// 	query := `
+	// SELECT
+	//     groupArray() AS capture_timestamp,
+	//     groupArray() AS probe_ttl,
+	//     groupArray() AS reply_src_addr,
+	//     groupArray() AS round,
+	//
+	//     -- flowid
+	//     probe_protocol,
+	//     probe_src_addr,
+	//     probe_dst_addr,
+	//     probe_src_port,
+	//     probe_dst_port
+	// FROM
+	//     %s.%s
+	// WHERE
+	// ;` // end of the query
+	//
+	// 	return fmt.Sprintf(
+	// 		query,
+	// 		strings.Join(fieldNames, ", "),
+	// 		q.Database,
+	// 		strings.Join(q.TableNames, ")|("),
+	// 	), nil
 	panic("not implemented")
-	// TODO change this
-	fieldNames, err := orm.GetFieldJSONTags(q.Object)
-	if err != nil {
-		return "", err
-	}
-
-	return fmt.Sprintf(
-		query,
-		strings.Join(fieldNames, ", "),
-		q.Database,
-		strings.Join(q.TableNames, ")|("),
-	), nil
 }
 
 func buildRegexFromTableNames(names []string) string {

@@ -37,16 +37,38 @@ func (s *ArkStreamer) Ingest(t time.Time, numParalel int) <-chan *apiv3.IrisResu
 	var counter int64 = 0
 
 	s.G.Go(func() error {
-		urls, err := s.client.GetWartURLs(s.ctx, t)
-		if err != nil {
-			return err
+		var urls []string
+		var err error
+
+		for i := 1; i <= config.DefaultMaxRetries; i++ {
+			urls, err = s.client.GetWartURLs(s.ctx, t)
+			if err == nil {
+				break
+			} else if i == config.DefaultMaxRetries {
+				logger.Errorf("arkstreamer error on GetWartURLs, max retries (%d) reached: %s", i, err)
+				return err
+			} else {
+				logger.Errorf("arkstreamer error on GetWartURLs: %s", err)
+				time.Sleep(time.Second * 5)
+			}
 		}
 
 		for _, url := range urls {
 			s.G.Go(func() error {
-				currentCh, err := s.client.StreamIrisResultsRows(s.ctx, url)
-				if err != nil {
-					return err
+				var currentCh <-chan *apiv3.IrisResultsRow
+				var err error
+
+				for i := 1; i <= config.DefaultMaxRetries; i++ {
+					currentCh, err = s.client.StreamIrisResultsRows(s.ctx, url)
+					if err == nil {
+						break
+					} else if i == config.DefaultMaxRetries {
+						logger.Errorf("arkstreamer error on StreamIrisResultsRows, max retries (%d) reached: %s", i, err)
+						return err
+					} else {
+						logger.Errorf("arkstreamer error on StreamIrisResultsRows: %s", err)
+						time.Sleep(time.Second * config.DefaultArkRetryWaitSeconds)
+					}
 				}
 
 				for obj := range currentCh {

@@ -33,8 +33,8 @@ func GetInsertableFieldJSONTags(row interface{}) ([]string, error) {
 		jsonTag := typeField.Tag.Get("json")
 		mpatTag := typeField.Tag.Get("mpat")
 
-		// of there is a tag `json:"my_field_name" mpat:"no-insert"`
-		if !strings.Contains(mpatTag, "no-insert") {
+		// of there is a tag `json:"my_field_name" mpat:"no_insert"`
+		if !strings.Contains(mpatTag, "no_insert") {
 			jsonNames = append(jsonNames, jsonTag)
 		}
 
@@ -78,7 +78,7 @@ func GetInsertableFields(row interface{}) ([]interface{}, error) {
 
 		mpatTag := typeField.Tag.Get("mpat")
 
-		if !strings.Contains(mpatTag, "no-insert") {
+		if !strings.Contains(mpatTag, "no_insert") {
 			fields = append(fields, valueField.Interface())
 		}
 	}
