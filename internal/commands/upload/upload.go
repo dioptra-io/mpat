@@ -35,9 +35,9 @@ func UpoadCmd() *cobra.Command {
 		Run:   uploadIrisResultsCmd,
 	}
 	uploadIrisResultsCmd.Flags().StringP("source-dsn", "s", "", "dsn string of production clickhouse database")
-	uploadIrisResultsCmd.Flags().Bool("ipv4", true, "use only ipv4 measurement tables")
+	uploadIrisResultsCmd.Flags().Int("af", 4, "address family")
 	viper.BindPFlag("source-dsn", uploadIrisResultsCmd.Flags().Lookup("source-dsn"))
-	viper.BindPFlag("ipv4", uploadIrisResultsCmd.Flags().Lookup("ipv4"))
+	viper.BindPFlag("af", uploadIrisResultsCmd.Flags().Lookup("af"))
 	viper.BindEnv("source-dsn", "MPAT_PROD_DSN")
 
 	uploadArkResultsCmd := &cobra.Command{
@@ -74,7 +74,7 @@ func uploadIrisResultsCmd(cmd *cobra.Command, args []string) {
 	force := viper.GetBool("force")
 	destinationDSNString := viper.GetString("dsn")
 	sourceDSNString := viper.GetString("source-dsn")
-	onlyIPv4Measurements := viper.GetBool("ipv4")
+	measurementsAddressFamily := viper.GetBool("af")
 	destinationTableName := args[1]
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -122,7 +122,7 @@ func uploadIrisResultsCmd(cmd *cobra.Command, args []string) {
 
 	logger.Println("Iris API health check positive.")
 
-	sourceTableNames, err := irisClient.GetTableNamesFor(onlyIPv4Measurements, false, sourceDate)
+	sourceTableNames, err := irisClient.GetTableNamesFor(measurementsAddressFamily, false, sourceDate)
 	if err != nil {
 		logger.Errorf("Iris client fetch table failed: %v.\n", err)
 		return

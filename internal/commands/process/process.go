@@ -36,7 +36,16 @@ func ProcessCmd() *cobra.Command {
 	processForwardingDecision.Flags().IntP("parallel-workers", "w", config.DefaultNumParallelWorkersInPipeline, "number of parallel workers spawned")
 	viper.BindPFlag("parallel-workers", processForwardingDecision.Flags().Lookup("parallel-workers"))
 
+	processForwardingInfo := &cobra.Command{
+		Use:   "forwarding-info <input-table> <output-table>",
+		Short: "Compute forwarding decision",
+		Long:  "Compute the forwarding decision table given in forwarding info design doc.",
+		Args:  cobra.ArbitraryArgs,
+		Run:   processForwardingDecisionCmd,
+	}
+
 	processCmd.AddCommand(processForwardingDecision)
+	processCmd.AddCommand(processForwardingInfo)
 
 	return processCmd
 }

@@ -79,7 +79,7 @@ func (c *IrisClient) GetAllMeasurementsOn(ipv4, finished bool, date v1.Date) ([]
 
 	var filtered []apiv3.IrisctlMeasurement
 	for _, m := range meas {
-		if date.Contains(m.StartTime.Time) {
+		if m.StartTime != nil && date.Contains(m.StartTime.Time) {
 			filtered = append(filtered, m)
 		}
 	}
@@ -98,9 +98,9 @@ func refreshToken() error {
 	return nil
 }
 
-func (c *IrisClient) GetAllMeasurements(ipv4, finished bool) ([]apiv3.IrisctlMeasurement, error) {
+func (c *IrisClient) GetAllMeasurements(addressFamilyIPv4, finished bool) ([]apiv3.IrisctlMeasurement, error) {
 	tagString := config.DefaultIPv4Tag
-	if !ipv4 {
+	if !addressFamilyIPv4 {
 		tagString = config.DefaultIPv6Tag
 	}
 
