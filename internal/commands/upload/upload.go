@@ -74,7 +74,7 @@ func uploadIrisResultsCmd(cmd *cobra.Command, args []string) {
 	force := viper.GetBool("force")
 	destinationDSNString := viper.GetString("dsn")
 	sourceDSNString := viper.GetString("source-dsn")
-	measurementsAddressFamily := viper.GetBool("af")
+	measurementsAddressFamily := viper.GetInt("af")
 	destinationTableName := args[1]
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -83,6 +83,11 @@ func uploadIrisResultsCmd(cmd *cobra.Command, args []string) {
 	sourceDate, err := v1.ParseArkDate(args[0])
 	if err != nil {
 		logger.Errorf("Cannot parse given date: %v\n.", err)
+		return
+	}
+
+	if measurementsAddressFamily != 4 && measurementsAddressFamily != 6 {
+		logger.Errorln("Address family --af can only be 4 for IPv4 or 6 for IPv6")
 		return
 	}
 
@@ -122,7 +127,7 @@ func uploadIrisResultsCmd(cmd *cobra.Command, args []string) {
 
 	logger.Println("Iris API health check positive.")
 
-	sourceTableNames, err := irisClient.GetTableNamesFor(measurementsAddressFamily, false, sourceDate)
+	sourceTableNames, err := irisClient.GetTableNamesFor(measurementsAddressFamily == 4, false, sourceDate)
 	if err != nil {
 		logger.Errorf("Iris client fetch table failed: %v.\n", err)
 		return
