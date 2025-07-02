@@ -59,33 +59,18 @@ type GrouppedForwardingDecisionSelectQuery struct {
 func (q *GrouppedForwardingDecisionSelectQuery) Query() (string, error) {
 	// This should agree with the Scan function
 	query := `
-SELECT
-    groupArray(capture_timestamp) AS capture_timestamps,
-    groupArray(probe_ttl) AS probe_ttls,
-    groupArray(reply_src_addr) AS reply_src_addrs,
+SELECT 
+    groupArray(probe_ttl) AS probe_ttls, 
+    groupArray(reply_src_addr) AS reply_src_addrs, 
     groupArray(round) AS rounds,
-    probe_protocol,
-    probe_src_addr,
-    probe_dst_prefix,
-    probe_dst_addr,
-    probe_src_port,
-    probe_dst_port
-FROM
-    %s.%s
-GROUP BY
-    probe_protocol,
-    probe_src_addr,
-    probe_dst_prefix,
-    probe_dst_addr,
-    probe_src_port,
-    probe_dst_port
-ORDER BY 
     probe_protocol, 
     probe_src_addr, 
     probe_dst_prefix, 
-    probe_dst_addr, 
+    probe_dst_addr,
     probe_src_port, 
     probe_dst_port
+FROM %s.%s
+GROUP BY probe_protocol, probe_src_addr, probe_dst_prefix, probe_dst_addr, probe_src_port, probe_dst_port
 ;` // end of the query
 
 	return fmt.Sprintf(

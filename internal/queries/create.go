@@ -21,7 +21,7 @@ func (q *BasicCreateQuery) Query() (string, error) {
 	case v3.IrisResultsRow:
 		query = CreateIrisResultsRowQuery
 	case v3.ForwardingDecisionRow:
-		query = CreateForwardingDecisionQuery
+		query = CreateIrisResultsRowQuery
 	default:
 		return "", errors.New("cannot find the create query for type")
 	}
@@ -41,7 +41,7 @@ func (q *BasicCreateQuery) Query() (string, error) {
 
 const CreateIrisResultsRowQuery = `
 CREATE TABLE %s %s.%s (
-    capture_timestamp      DateTime CODEC(T64, ZSTD(1)),
+    capture_timestamp      DateTime,
     probe_protocol         UInt8,
     probe_src_addr         IPv6,
     probe_dst_addr         IPv6,
@@ -100,24 +100,24 @@ CREATE TABLE %s %s.%s (
     time_exceeded_reply    UInt8 MATERIALIZED (reply_protocol = 1 AND reply_icmp_type = 11) OR (reply_protocol = 58 AND reply_icmp_type = 3)
 )
 ENGINE MergeTree
-ORDER BY (probe_protocol, probe_src_addr, probe_dst_prefix, probe_dst_addr, probe_src_port, probe_dst_port, probe_ttl)
+ORDER BY (probe_protocol, probe_src_addr, probe_dst_prefix, probe_dst_addr, probe_src_port, probe_dst_port)
 ;`
 
 const CreateForwardingDecisionQuery = `
 CREATE TABLE %s %s.%s (
-    capture_timestamp  DateTime CODEC(T64, ZSTD(1)),
+    -- capture_timestamp  DateTime CODEC(T64, ZSTD(1)),
     near_round         UInt8,
     near_addr          IPv6,
     near_probe_ttl     UInt8,
     far_round          UInt8,
     far_addr           IPv6,
     far_probe_ttl      UInt8,
-    probe_protocol     UInt8, -- flowid
+    probe_protocol     UInt8, -- flowid columns
     probe_src_addr     IPv6,
     probe_dst_prefix   IPv6,
     probe_dst_addr     IPv6,
     probe_src_port     UInt16,
     probe_dst_port     UInt16
 ) ENGINE = MergeTree
-ORDER BY (near_addr, far_addr, probe_dst_prefix, capture_timestamp)
+ORDER BY (near_addr, far_addr, probe_dst_prefix)
 ;`

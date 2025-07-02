@@ -10,9 +10,9 @@ import (
 )
 
 type forwardingDecisionProcessor struct {
+	G          *errgroup.Group // rename
 	bufferSize int
 	workers    int
-	G          *errgroup.Group
 	ctx        context.Context
 }
 
@@ -72,19 +72,19 @@ func processForwardingDecision(ctx context.Context, item *apiv3.GrouppedForwardi
 		for _, nearIndex := range ttlToIndexMap[ttl] {
 			for _, farIndex := range ttlToIndexMap[ttl+1] {
 				forwardingDecisionRow := &apiv3.ForwardingDecisionRow{
-					CaptureTimestamp: item.CaptureTimestamps[nearIndex],
-					NearRound:        item.Rounds[nearIndex],
-					NearAddr:         item.ReplySrcAddrs[nearIndex],
-					NearProbeTTL:     item.Rounds[nearIndex],
-					FarRound:         item.Rounds[farIndex],
-					FarAddr:          item.ReplySrcAddrs[farIndex],
-					FarProbeTTL:      item.Rounds[farIndex],
-					ProbeProtocol:    item.ProbeProtocol,
-					ProbeSrcAddr:     item.ProbeSrcAddr,
-					ProbeDstPrefix:   item.ProbeDstPrefix,
-					ProbeDstAddr:     item.ProbeDstAddr,
-					ProbeSrcPort:     item.ProbeSrcPort,
-					ProbeDstPort:     item.ProbeDstPort,
+					// CaptureTimestamp: item.CaptureTimestamps[nearIndex],
+					NearRound:      item.Rounds[nearIndex],
+					NearAddr:       item.ReplySrcAddrs[nearIndex],
+					NearProbeTTL:   item.Rounds[nearIndex],
+					FarRound:       item.Rounds[farIndex],
+					FarAddr:        item.ReplySrcAddrs[farIndex],
+					FarProbeTTL:    item.Rounds[farIndex],
+					ProbeProtocol:  item.ProbeProtocol,
+					ProbeSrcAddr:   item.ProbeSrcAddr,
+					ProbeDstPrefix: item.ProbeDstPrefix,
+					ProbeDstAddr:   item.ProbeDstAddr,
+					ProbeSrcPort:   item.ProbeSrcPort,
+					ProbeDstPort:   item.ProbeDstPort,
 				}
 				select {
 				case <-ctx.Done():

@@ -95,10 +95,10 @@ func (lt *IrisAPITime) UnmarshalJSON(b []byte) error {
 
 type GrouppedForwardingDecisionResultsRow struct {
 	// Info used in forwarding decision computation
-	CaptureTimestamps []time.Time `json:"capture_timestamps" mpat:"group_uniq_array"`
-	ProbeTTLs         []uint8     `json:"probe_ttls"         mpat:"group_uniq_array"`
-	ReplySrcAddrs     []net.IP    `json:"reply_src_addrs"    mpat:"group_uniq_array"`
-	Rounds            []uint8     `json:"rounds"             mpat:"group_uniq_array"`
+	// CaptureTimestamps []time.Time `json:"capture_timestamps" mpat:"group_uniq_array"`
+	ProbeTTLs     []uint8  `json:"probe_ttls"      mpat:"group_uniq_array"`
+	ReplySrcAddrs []net.IP `json:"reply_src_addrs" mpat:"group_uniq_array"`
+	Rounds        []uint8  `json:"rounds"          mpat:"group_uniq_array"`
 
 	// FlowID
 	ProbeProtocol  uint8  `json:"probe_protocol"`
@@ -129,13 +129,13 @@ type GrouppedForwardingDecisionResultsRow struct {
 
 type ForwardingDecisionRow struct {
 	// Info used in forwarding decision computation
-	CaptureTimestamp time.Time `json:"capture_timestamp"`
-	NearRound        uint8     `json:"near_round"`
-	NearAddr         net.IP    `json:"near_addr"`
-	NearProbeTTL     uint8     `json:"near_probe_ttl"`
-	FarRound         uint8     `json:"far_round"`
-	FarAddr          net.IP    `json:"far_addr"`
-	FarProbeTTL      uint8     `json:"far_probe_ttl"`
+	// CaptureTimestamp time.Time `json:"capture_timestamp"` // not a good idea to use this in the analysis
+	NearRound    uint8  `json:"near_round"`
+	NearAddr     net.IP `json:"near_addr"`
+	NearProbeTTL uint8  `json:"near_probe_ttl"`
+	FarRound     uint8  `json:"far_round"`
+	FarAddr      net.IP `json:"far_addr"`
+	FarProbeTTL  uint8  `json:"far_probe_ttl"`
 
 	// FlowID
 	ProbeProtocol  uint8  `json:"probe_protocol"`
