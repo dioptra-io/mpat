@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 )
@@ -44,10 +45,11 @@ func NewNativeSQLClient(dsn string) (*NativeSQLClient, error) {
 		Compression: &clickhouse.Compression{
 			Method: clickhouse.CompressionNone,
 		},
-		// Settings: clickhouse.Settings{
-		// 	"send_timeout":    360000 * time.Hour,
-		// 	"receive_timeout": 360000 * time.Hour,
-		// },
+		Settings: clickhouse.Settings{
+			"max_execution_time": 60000,
+		},
+		DialTimeout: 600 * time.Hour,
+		ReadTimeout: 600 * time.Hour,
 	})
 	if err != nil {
 		return nil, err
