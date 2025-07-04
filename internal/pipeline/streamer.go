@@ -113,6 +113,7 @@ func (s *ClickHouseRowStreamer[T]) Egress(objCh <-chan *T, q queries.Query, uplo
 				}
 
 				if counter%s.egressChunkSize == 0 {
+					logger.Printf("Sent total of %d row(s).\n", counter)
 					if err := batch.Send(); err != nil {
 						return fmt.Errorf("sending batch send function: %w", err)
 					}

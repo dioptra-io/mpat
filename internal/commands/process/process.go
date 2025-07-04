@@ -84,7 +84,7 @@ func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	destinationManager := pipeline.NewClickHouseManager[v3.IrisResultsRow](ctx, clickHouseClient)
+	destinationManager := pipeline.NewClickHouseManager[v3.ForwardingDecisionRow](ctx, clickHouseClient)
 	err = destinationManager.DeleteThenCreate(&queries.BasicDeleteQuery{
 		TableName:       destinationTableName,
 		AddCheckIfExist: true,
@@ -106,7 +106,7 @@ func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
 		Database:  clickHouseClient.Database,
 	})
 
-	processStreamer := pipeline.NewForwardingDecisionProcessor(ctx, parallelWorkers, 1000)
+	processStreamer := pipeline.NewForwardingDecisionProcessor(ctx, parallelWorkers, 1000000)
 	processCh := processStreamer.Start(ingestCh)
 
 	destinationStreamer := pipeline.NewClickHouseRowStreamer[v3.ForwardingDecisionRow](ctx, clickHouseClient)

@@ -36,6 +36,7 @@ func (p *forwardingDecisionProcessor) Start(ingestCh <-chan *apiv3.GrouppedForwa
 				if err != nil {
 					return err
 				}
+				logger.Debugln("An element is passed with success.")
 			}
 			return nil
 		})

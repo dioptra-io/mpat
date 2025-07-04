@@ -21,7 +21,7 @@ func (q *BasicCreateQuery) Query() (string, error) {
 	case v3.IrisResultsRow:
 		query = CreateIrisResultsRowQuery
 	case v3.ForwardingDecisionRow:
-		query = CreateIrisResultsRowQuery
+		query = CreateForwardingDecisionQuery
 	default:
 		return "", errors.New("cannot find the create query for type")
 	}
