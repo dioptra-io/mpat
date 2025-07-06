@@ -54,23 +54,25 @@ func (q *BasicSelectStartQuery) Query() (string, error) {
 type GrouppedForwardingDecisionSelectQuery struct {
 	TableName string
 	Database  string
+	Limit     int
+	Offset    int
 }
 
 func (q *GrouppedForwardingDecisionSelectQuery) Query() (string, error) {
 	// This should agree with the Scan function
 	query := `
+WITH
+    cityHash64(probe_protocol, probe_src_addr, probe_dst_addr, probe_src_port, probe_dst_port) AS flowhash
 SELECT 
     groupArray(probe_ttl) AS probe_ttls, 
     groupArray(reply_src_addr) AS reply_src_addrs, 
-    groupArray(round) AS rounds,
-    probe_protocol, 
+    groupArray(probe_dst_addr) AS probe_dst_addrs,
+    groupArray(flowhash) AS flowhashes,
+    uniqExact(flowhash) AS num_distinct_flowhashes,
     probe_src_addr, 
-    probe_dst_prefix, 
-    probe_dst_addr,
-    probe_src_port, 
-    probe_dst_port
+    probe_dst_prefix
 FROM %s.%s
-GROUP BY probe_protocol, probe_src_addr, probe_dst_prefix, probe_dst_addr, probe_src_port, probe_dst_port
+GROUP BY probe_src_addr, probe_dst_prefix
 ;` // end of the query
 
 	return fmt.Sprintf(

@@ -105,19 +105,11 @@ ORDER BY (probe_protocol, probe_src_addr, probe_dst_prefix, probe_dst_addr, prob
 
 const CreateForwardingDecisionQuery = `
 CREATE TABLE %s %s.%s (
-    -- capture_timestamp  DateTime CODEC(T64, ZSTD(1)),
-    near_round         UInt8,
     near_addr          IPv6,
-    near_probe_ttl     UInt8,
-    far_round          UInt8,
     far_addr           IPv6,
-    far_probe_ttl      UInt8,
-    probe_protocol     UInt8, -- flowid columns
+    near_probe_ttl     UInt8,
     probe_src_addr     IPv6,
     probe_dst_prefix   IPv6,
-    probe_dst_addr     IPv6,
-    probe_src_port     UInt16,
-    probe_dst_port     UInt16
-) ENGINE = MergeTree
+) ENGINE MergeTree
 ORDER BY (near_addr, far_addr, probe_dst_prefix)
 ;`

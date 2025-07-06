@@ -51,46 +51,60 @@ func (p *forwardingDecisionProcessor) Start(ingestCh <-chan *apiv3.GrouppedForwa
 }
 
 func processForwardingDecision(ctx context.Context, item *apiv3.GrouppedForwardingDecisionResultsRow, output chan<- *apiv3.ForwardingDecisionRow) error {
-	minTTL, maxTTL := slices.Min(item.ProbeTTLs), slices.Max(item.ProbeTTLs)
-	ttlToIndexMap := make(map[uint8][]int, maxTTL-minTTL+1)
-
+	flowhashToIndiciesMap := make(map[uint64][]int, item.DistinctFlowhashes)
 	for i := 0; i < len(item.ProbeTTLs); i++ {
-		currentTTL := item.ProbeTTLs[i]
-		currentAddress := item.ReplySrcAddrs[i]
-
-		for _, j := range ttlToIndexMap[currentTTL] {
-			otherAddress := item.ReplySrcAddrs[j]
-
-			if otherAddress.Equal(currentAddress) {
-				continue
-			}
-		}
-
-		ttlToIndexMap[currentTTL] = append(ttlToIndexMap[currentTTL], i)
+		flowhashToIndiciesMap[item.FlowHashes[i]] = append(flowhashToIndiciesMap[item.FlowHashes[i]], i)
 	}
 
-	for ttl := minTTL; ttl <= maxTTL; ttl++ {
-		for _, nearIndex := range ttlToIndexMap[ttl] {
-			for _, farIndex := range ttlToIndexMap[ttl+1] {
-				forwardingDecisionRow := &apiv3.ForwardingDecisionRow{
-					// CaptureTimestamp: item.CaptureTimestamps[nearIndex],
-					NearRound:      item.Rounds[nearIndex],
-					NearAddr:       item.ReplySrcAddrs[nearIndex],
-					NearProbeTTL:   item.Rounds[nearIndex],
-					FarRound:       item.Rounds[farIndex],
-					FarAddr:        item.ReplySrcAddrs[farIndex],
-					FarProbeTTL:    item.Rounds[farIndex],
-					ProbeProtocol:  item.ProbeProtocol,
-					ProbeSrcAddr:   item.ProbeSrcAddr,
-					ProbeDstPrefix: item.ProbeDstPrefix,
-					ProbeDstAddr:   item.ProbeDstAddr,
-					ProbeSrcPort:   item.ProbeSrcPort,
-					ProbeDstPort:   item.ProbeDstPort,
+	// indiciesSubset shares the same flowhash this flowid
+	for _, indiciesSubset := range flowhashToIndiciesMap {
+		probeTTLS := make([]uint8, 0, len(indiciesSubset))
+
+		for _, index := range indiciesSubset {
+			probeTTLS = append(probeTTLS, item.ProbeTTLs[index])
+		}
+
+		minTTL, maxTTL := slices.Min(probeTTLS), slices.Max(probeTTLS)
+		ttlToIndexMap := make(map[uint8][]int, maxTTL-minTTL+1)
+
+	outer:
+		for _, index := range indiciesSubset {
+			currentTTL := item.ProbeTTLs[index]
+			currentAddress := item.ReplySrcAddrs[index]
+
+			for _, j := range ttlToIndexMap[currentTTL] {
+				otherAddress := item.ReplySrcAddrs[j]
+
+				// Ensure uniqueness of the address under the same TTL
+				if otherAddress.Equal(currentAddress) {
+					continue outer
 				}
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case output <- forwardingDecisionRow:
+			}
+
+			ttlToIndexMap[currentTTL] = append(ttlToIndexMap[currentTTL], index)
+		}
+
+		for ttl := minTTL; ttl <= maxTTL; ttl++ {
+			for _, nearIndex := range ttlToIndexMap[ttl] {
+				for _, farIndex := range ttlToIndexMap[ttl+1] {
+					// Do not add self forwarding decisions (they are most likely to be false)
+					if item.ReplySrcAddrs[nearIndex].Equal(item.ReplySrcAddrs[farIndex]) {
+						continue
+					}
+
+					forwardingDecisionRow := &apiv3.ForwardingDecisionRow{
+						NearAddr:       item.ReplySrcAddrs[nearIndex],
+						FarAddr:        item.ReplySrcAddrs[farIndex],
+						NearProbeTTL:   item.ProbeTTLs[nearIndex],
+						ProbeSrcAddr:   item.ProbeSrcAddr,
+						ProbeDstPrefix: item.ProbeDstPrefix,
+					}
+
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case output <- forwardingDecisionRow:
+					}
 				}
 			}
 		}

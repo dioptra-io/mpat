@@ -94,54 +94,27 @@ func (lt *IrisAPITime) UnmarshalJSON(b []byte) error {
 }
 
 type GrouppedForwardingDecisionResultsRow struct {
-	// Info used in forwarding decision computation
-	// CaptureTimestamps []time.Time `json:"capture_timestamps" mpat:"group_uniq_array"`
-	ProbeTTLs     []uint8  `json:"probe_ttls"      mpat:"group_uniq_array"`
-	ReplySrcAddrs []net.IP `json:"reply_src_addrs" mpat:"group_uniq_array"`
-	Rounds        []uint8  `json:"rounds"          mpat:"group_uniq_array"`
+	// Arrays from groupArray()
+	ProbeTTLs     []uint8  `json:"probe_ttls"      mpat:"group_array"`
+	ReplySrcAddrs []net.IP `json:"reply_src_addrs" mpat:"group_array"`
+	// Rounds        []uint8  `json:"rounds"          mpat:"group_array"`
+	ProbeDstAddrs []net.IP `json:"probe_dst_addrs" mpat:"group_array"`
+	FlowHashes    []uint64 `json:"flowhashes"      mpat:"group_array"`
 
-	// FlowID
-	ProbeProtocol  uint8  `json:"probe_protocol"`
-	ProbeSrcAddr   net.IP `json:"probe_src_addr"`
-	ProbeDstPrefix net.IP `json:"probe_dst_prefix"`
-	ProbeDstAddr   net.IP `json:"probe_dst_addr"`
-	ProbeSrcPort   uint16 `json:"probe_src_port"`
-	ProbeDstPort   uint16 `json:"probe_dst_port"`
-
-	// Other fields that are not used currently
-	// QuotedTTL              uint8       `json:"quoted_ttl"`
-	// ReplyProtocol          uint8       `json:"reply_protocol"`
-	// ReplyICMPType          uint8       `json:"reply_icmp_type"`
-	// ReplyICMPCode          uint8       `json:"reply_icmp_code"`
-	// ReplyTTL               uint8       `json:"reply_ttl"`
-	// ReplySize              uint16      `json:"reply_size"`
-	// ReplyMPLSLabels        interface{} `json:"reply_mpls_labels"`
-	// RTT                    uint16      `json:"rtt"`
-	// ProbeDstPrefix         net.IP      `json:"probe_dst_prefix"         mpat:"no_insert"` // Computed
-	// ReplySrcPrefix         net.IP      `json:"reply_src_prefix"         mpat:"no_insert"` // Computed
-	// PrivateProbeDstPrefix  uint8       `json:"private_probe_dst_prefix" mpat:"no_insert"` // Computed
-	// PrivateReplySrcAddr    uint8       `json:"private_reply_src_addr"   mpat:"no_insert"` // Computed
-	// DestinationHostReply   uint8       `json:"destination_host_reply"   mpat:"no_insert"` // Computed
-	// DestinationPrefixReply uint8       `json:"destination_prefix_reply" mpat:"no_insert"` // Computed
-	// ValidProbeProtocol     uint8       `json:"valid_probe_protocol"     mpat:"no_insert"` // Computed
-	// TimeExceededReply      uint8       `json:"time_exceeded_reply"      mpat:"no_insert"` // Computed
+	// Grouping keys
+	DistinctFlowhashes uint64 `json:"num_distinct_flowhashes"`
+	ProbeSrcAddr       net.IP `json:"probe_src_addr"`
+	ProbeDstPrefix     net.IP `json:"probe_dst_prefix"`
 }
 
 type ForwardingDecisionRow struct {
 	// Info used in forwarding decision computation
 	// CaptureTimestamp time.Time `json:"capture_timestamp"` // not a good idea to use this in the analysis
-	NearRound    uint8  `json:"near_round"`
 	NearAddr     net.IP `json:"near_addr"`
-	NearProbeTTL uint8  `json:"near_probe_ttl"`
-	FarRound     uint8  `json:"far_round"`
 	FarAddr      net.IP `json:"far_addr"`
-	FarProbeTTL  uint8  `json:"far_probe_ttl"`
+	NearProbeTTL uint8  `json:"near_probe_ttl"`
 
 	// FlowID
-	ProbeProtocol  uint8  `json:"probe_protocol"`
 	ProbeSrcAddr   net.IP `json:"probe_src_addr"`
 	ProbeDstPrefix net.IP `json:"probe_dst_prefix"`
-	ProbeDstAddr   net.IP `json:"probe_dst_addr"`
-	ProbeSrcPort   uint16 `json:"probe_src_port"`
-	ProbeDstPort   uint16 `json:"probe_dst_port"`
 }
