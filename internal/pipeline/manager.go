@@ -55,3 +55,15 @@ func (m *ClickHouseManager[T]) Delete(q queries.Query) error {
 	}
 	return nil
 }
+
+func (m *ClickHouseManager[T]) Execute(q queries.Query) error {
+	query, err := q.Query()
+	if err != nil {
+		return err
+	}
+
+	if err := m.client.Exec(m.ctx, query); err != nil {
+		return fmt.Errorf("manager table execution failed: %w", err)
+	}
+	return nil
+}

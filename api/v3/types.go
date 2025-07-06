@@ -118,3 +118,13 @@ type ForwardingDecisionRow struct {
 	ProbeSrcAddr   net.IP `json:"probe_src_addr"`
 	ProbeDstPrefix net.IP `json:"probe_dst_prefix"`
 }
+
+type ScoresRow struct {
+	Addr              net.IP `json:"addr"`
+	RouteScore        net.IP `json:"route_score"`
+	RouteCompleteness net.IP `json:"route_completeness"`
+}
+
+type PFRow struct {
+	ProbeDstPrefix net.IP `json:"probe_dst_prefix"`
+}

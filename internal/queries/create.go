@@ -22,6 +22,10 @@ func (q *BasicCreateQuery) Query() (string, error) {
 		query = CreateIrisResultsRowQuery
 	case v3.ForwardingDecisionRow:
 		query = CreateForwardingDecisionQuery
+	case v3.ScoresRow:
+		query = CreateScoresQuery
+	case v3.PFRow:
+		query = CreatePFQuery
 	default:
 		return "", errors.New("cannot find the create query for type")
 	}
@@ -112,4 +116,20 @@ CREATE TABLE %s %s.%s (
     probe_dst_prefix   IPv6,
 ) ENGINE MergeTree
 ORDER BY (near_addr, far_addr, probe_dst_prefix)
+;`
+
+const CreateScoresQuery = `
+CREATE TABLE %s %s.%s (
+    addr IPv6,
+    route_score UInt64,
+    route_completeness Float64 MATERIALIZED route_score * 255.0 / 3706452992 -- const expression
+) ENGINE MergeTree
+ORDER BY (route_score);
+;`
+
+const CreatePFQuery = `
+CREATE TABLE %s %s.%s (
+    probe_dst_prefix    IPv6
+) ENGINE MergeTree
+ORDER BY (probe_dst_prefix)
 ;`
