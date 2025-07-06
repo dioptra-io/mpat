@@ -92,3 +92,22 @@ WHERE database = '%s' AND name = '%s'
 	}
 	return tableSize, nil
 }
+
+func (a *NativeSQLClient) NumRows(ctx context.Context, tableName string) (uint64, error) {
+	query := `
+SELECT count(*)
+FROM %s.%s 
+;` // end of the query
+
+	formattedQuery := fmt.Sprintf(
+		query,
+		a.Database,
+		tableName,
+	)
+
+	var tableSize uint64
+	if err := a.QueryRow(ctx, formattedQuery).Scan(&tableSize); err != nil {
+		return 0, err
+	}
+	return tableSize, nil
+}

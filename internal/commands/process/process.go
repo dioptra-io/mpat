@@ -103,12 +103,13 @@ func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
 	processPrefixesCmd(cmd, []string{stemName})
 	cmd.Flags().Lookup("force").Value.Set(strconv.FormatBool(force)) // restore
 
-	numDestinationPrefixes, err := clickHouseClient.TableSize(ctx, prefixTable)
+	numDestinationPrefixes, err := clickHouseClient.NumRows(ctx, prefixTable)
 	if err != nil {
 		logger.Errorf("Destination ClickHouse prefix table check failed: %v.\n", err)
 		return
 	}
 	totalIterations := int(math.Ceil(float64(numDestinationPrefixes) / float64(numPrefixesPerChunk)))
+	logger.Printf("Going to chunk by %d prefixes, total of %d", totalIterations, numDestinationPrefixes)
 
 	destinationManager := pipeline.NewClickHouseManager[v3.ForwardingDecisionRow](ctx, clickHouseClient)
 	err = destinationManager.DeleteThenCreate(&queries.BasicDeleteQuery{
@@ -128,7 +129,10 @@ func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
 
 	logger.Println("Started processing in chunks.")
 
+	i := 0
+
 	for offset := 0; offset < totalIterations; offset++ {
+		i++
 		sourceStreamer := pipeline.NewClickHouseRowStreamer[v3.GrouppedForwardingDecisionResultsRow](ctx, clickHouseClient)
 		ingestCh := sourceStreamer.Ingest(&queries.GrouppedForwardingDecisionSelectQuery{
 			TableName:   routeTraceTable,
@@ -157,6 +161,8 @@ func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
 			logger.Errorf("An error occured while transfering data: %v.\n", err)
 			return
 		}
+
+		logger.Printf("Chunk %d completed.\n", i)
 	}
 
 	logger.Println("Done!")
