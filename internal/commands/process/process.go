@@ -2,6 +2,9 @@ package process
 
 import (
 	"context"
+	"fmt"
+	"math"
+	"strconv"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -27,7 +30,7 @@ func ProcessCmd() *cobra.Command {
 	}
 
 	processForwardingDecision := &cobra.Command{
-		Use:   "forwarding-decision <input-table> <output-table>",
+		Use:   "forwarding-decision <input-table> <prefix-table> <output-table>",
 		Short: "Compute forwarding decision",
 		Long:  "Compute the forwarding decision table given in forwarding info design doc.",
 		Args:  cobra.ArbitraryArgs,
@@ -64,15 +67,17 @@ func processCmd(cmd *cobra.Command, args []string) {
 }
 
 func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
-	if len(args) < 2 {
+	if len(args) < 3 {
 		logger.Printf("Process command requires at least 2 arguments, got %d", len(args))
 		return
 	}
 	force := viper.GetBool("force")
 	parallelWorkers := viper.GetInt("parallel-workers")
+	numPrefixesPerChunk := 100000
 	clickHouseDSNString := viper.GetString("dsn")
 	sourceTableName := args[0]
-	destinationTableName := args[1]
+	destinationTableName := args[2]
+	prefixTable := fmt.Sprintf("pf_%s", sourceTableName)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -89,9 +94,20 @@ func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
 		logger.Errorf("Destination ClickHouse database table check failed: %v.\n", err)
 		return
 	} else if tableSize > 0 && !force {
-		logger.Errorf("Non-empty table exists in the destination, try --force flag.")
+		logger.Errorf("Non-empty source table exists in the destination, try --force flag.")
 		return
 	}
+
+	cmd.Flags().Lookup("force").Value.Set("true")
+	processPrefixesCmd(cmd, []string{sourceTableName, prefixTable})
+	cmd.Flags().Lookup("force").Value.Set(strconv.FormatBool(force)) // restore
+
+	numDestinationPrefixes, err := clickHouseClient.TableSize(ctx, prefixTable)
+	if err != nil {
+		logger.Errorf("Destination ClickHouse prefix table check failed: %v.\n", err)
+		return
+	}
+	totalIterations := int(math.Ceil(float64(numDestinationPrefixes) / float64(numPrefixesPerChunk)))
 
 	destinationManager := pipeline.NewClickHouseManager[v3.ForwardingDecisionRow](ctx, clickHouseClient)
 	err = destinationManager.DeleteThenCreate(&queries.BasicDeleteQuery{
@@ -109,32 +125,37 @@ func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	sourceStreamer := pipeline.NewClickHouseRowStreamer[v3.GrouppedForwardingDecisionResultsRow](ctx, clickHouseClient)
-	ingestCh := sourceStreamer.Ingest(&queries.GrouppedForwardingDecisionSelectQuery{
-		TableName: sourceTableName,
-		Database:  clickHouseClient.Database,
-	})
+	logger.Println("Started processing in chunks.")
 
-	processStreamer := pipeline.NewForwardingDecisionProcessor(ctx, parallelWorkers, 1000000)
-	processCh := processStreamer.Start(ingestCh)
+	for offset := 0; offset < totalIterations; offset++ {
+		sourceStreamer := pipeline.NewClickHouseRowStreamer[v3.GrouppedForwardingDecisionResultsRow](ctx, clickHouseClient)
+		ingestCh := sourceStreamer.Ingest(&queries.GrouppedForwardingDecisionSelectQuery{
+			TableName:   sourceTableName,
+			PrefixTable: prefixTable,
+			Database:    clickHouseClient.Database,
+			Limit:       numPrefixesPerChunk,
+			Offset:      offset,
+		})
 
-	destinationStreamer := pipeline.NewClickHouseRowStreamer[v3.ForwardingDecisionRow](ctx, clickHouseClient)
-	destinationStreamer.Egress(processCh, &queries.BasicInsertQuery{
-		TableName: destinationTableName,
-		Database:  clickHouseClient.Database,
-		Object:    v3.ForwardingDecisionRow{},
-	}, 1)
+		processStreamer := pipeline.NewForwardingDecisionProcessor(ctx, parallelWorkers, 1000000)
+		processCh := processStreamer.Start(ingestCh)
 
-	logger.Println("Started processing.")
+		destinationStreamer := pipeline.NewClickHouseRowStreamer[v3.ForwardingDecisionRow](ctx, clickHouseClient)
+		destinationStreamer.Egress(processCh, &queries.BasicInsertQuery{
+			TableName: destinationTableName,
+			Database:  clickHouseClient.Database,
+			Object:    v3.ForwardingDecisionRow{},
+		}, 1)
 
-	var topGroup errgroup.Group
-	topGroup.Go(sourceStreamer.G.Wait)
-	topGroup.Go(processStreamer.G.Wait)
-	topGroup.Go(destinationStreamer.G.Wait)
+		var topGroup errgroup.Group
+		topGroup.Go(sourceStreamer.G.Wait)
+		topGroup.Go(processStreamer.G.Wait)
+		topGroup.Go(destinationStreamer.G.Wait)
 
-	if err := topGroup.Wait(); err != nil {
-		logger.Errorf("An error occured while transfering data %v.\n", err)
-		return
+		if err := topGroup.Wait(); err != nil {
+			logger.Errorf("An error occured while transfering data: %v.\n", err)
+			return
+		}
 	}
 
 	logger.Println("Done!")

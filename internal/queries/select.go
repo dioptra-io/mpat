@@ -52,10 +52,11 @@ func (q *BasicSelectStartQuery) Query() (string, error) {
 }
 
 type GrouppedForwardingDecisionSelectQuery struct {
-	TableName string
-	Database  string
-	Limit     int
-	Offset    int
+	TableName   string
+	PrefixTable string
+	Database    string
+	Limit       int
+	Offset      int
 }
 
 func (q *GrouppedForwardingDecisionSelectQuery) Query() (string, error) {
@@ -72,6 +73,7 @@ SELECT
     probe_src_addr, 
     probe_dst_prefix
 FROM %s.%s
+WHERE probe_dst_prefix IN (SELECT probe_dst_prefix FROM %s.%s LIMIT %d OFFSET %d)
 GROUP BY probe_src_addr, probe_dst_prefix
 ;` // end of the query
 
@@ -79,6 +81,10 @@ GROUP BY probe_src_addr, probe_dst_prefix
 		query,
 		q.Database,
 		q.TableName,
+		q.Database,
+		q.PrefixTable,
+		q.Limit,
+		q.Offset,
 	), nil
 }
 

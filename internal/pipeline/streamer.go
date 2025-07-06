@@ -43,6 +43,8 @@ func (s *ClickHouseRowStreamer[T]) Ingest(q queries.Query) <-chan *T {
 			return fmt.Errorf("streamer ingest query generation failed: %w", err)
 		}
 
+		logger.Debugf("query: %s", query)
+
 		rows, err := s.client.Query(s.ctx, query)
 		if err != nil {
 			return fmt.Errorf("streamer ingest query invokation filed: %w", err)
