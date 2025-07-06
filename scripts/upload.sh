@@ -25,7 +25,7 @@ upload_for_date() {
     local datestr="${date//-/}"
 
     log "Uploading ${MODE}4__${datestr}..."
-    mpat_command upload "${MODE}-results" "$date" "${MODE}4__${datestr}"
+    mpat_command upload "${MODE}-results" "$date" "${datestr}__${MODE}4__rt"
     local command_status=$?
 
     if [[ $command_status -ne 0 ]]; then
