@@ -141,3 +141,17 @@ func ProtocolToUint8(p string) uint8 {
 		return 0
 	}
 }
+
+func MergeMaps(map1, map2 map[string]any) map[string]any {
+	result := make(map[string]any)
+
+	for k, v := range map1 {
+		result[k] = v
+	}
+
+	for k, v := range map2 {
+		result[k] = v
+	}
+
+	return result
+}
