@@ -30,7 +30,7 @@ func ProcessCmd() *cobra.Command {
 	}
 
 	processForwardingDecision := &cobra.Command{
-		Use:   "forwarding-decision <input-table> <prefix-table> <output-table>",
+		Use:   "forwarding-decision <stem>",
 		Short: "Compute forwarding decision",
 		Long:  "Compute the forwarding decision table given in forwarding info design doc.",
 		Args:  cobra.ArbitraryArgs,
@@ -40,7 +40,7 @@ func ProcessCmd() *cobra.Command {
 	viper.BindPFlag("parallel-workers", processForwardingDecision.Flags().Lookup("parallel-workers"))
 
 	processPrefixes := &cobra.Command{
-		Use:   "prefixes <input-table> <output-table>",
+		Use:   "prefixes <stem>",
 		Short: "Compute score",
 		Long:  "Compute the scores table given in forwarding info design doc.",
 		Args:  cobra.ArbitraryArgs,
@@ -48,7 +48,7 @@ func ProcessCmd() *cobra.Command {
 	}
 
 	processForwardingInfo := &cobra.Command{
-		Use:   "scores <input-table> <output-table>",
+		Use:   "scores <stem>",
 		Short: "Compute score",
 		Long:  "Compute the scores table given in forwarding info design doc.",
 		Args:  cobra.ArbitraryArgs,
@@ -67,17 +67,18 @@ func processCmd(cmd *cobra.Command, args []string) {
 }
 
 func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
-	if len(args) < 3 {
-		logger.Printf("Process command requires at least 2 arguments, got %d", len(args))
+	if len(args) < 1 {
+		logger.Printf("Process command requires 1 argument, got %d", len(args))
 		return
 	}
 	force := viper.GetBool("force")
 	parallelWorkers := viper.GetInt("parallel-workers")
 	numPrefixesPerChunk := 100000
 	clickHouseDSNString := viper.GetString("dsn")
-	sourceTableName := args[0]
-	destinationTableName := args[2]
-	prefixTable := fmt.Sprintf("pf_%s", sourceTableName)
+	stemName := args[0]
+	routeTraceTable := fmt.Sprintf("%s__rt", stemName)
+	forwardingDecisionTable := fmt.Sprintf("%s__fd", stemName)
+	prefixTable := fmt.Sprintf("%s__pf", stemName)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -90,7 +91,7 @@ func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
 
 	logger.Println("Database health check positive.")
 
-	if tableSize, err := clickHouseClient.TableSize(ctx, destinationTableName); err != nil {
+	if tableSize, err := clickHouseClient.TableSize(ctx, forwardingDecisionTable); err != nil {
 		logger.Errorf("Destination ClickHouse database table check failed: %v.\n", err)
 		return
 	} else if tableSize > 0 && !force {
@@ -99,7 +100,7 @@ func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
 	}
 
 	cmd.Flags().Lookup("force").Value.Set("true")
-	processPrefixesCmd(cmd, []string{sourceTableName, prefixTable})
+	processPrefixesCmd(cmd, []string{stemName})
 	cmd.Flags().Lookup("force").Value.Set(strconv.FormatBool(force)) // restore
 
 	numDestinationPrefixes, err := clickHouseClient.TableSize(ctx, prefixTable)
@@ -111,11 +112,11 @@ func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
 
 	destinationManager := pipeline.NewClickHouseManager[v3.ForwardingDecisionRow](ctx, clickHouseClient)
 	err = destinationManager.DeleteThenCreate(&queries.BasicDeleteQuery{
-		TableName:       destinationTableName,
+		TableName:       forwardingDecisionTable,
 		AddCheckIfExist: true,
 		Database:        clickHouseClient.Database,
 	}, &queries.BasicCreateQuery{
-		TableName:           destinationTableName,
+		TableName:           forwardingDecisionTable,
 		AddCheckIfNotExists: true,
 		Database:            clickHouseClient.Database,
 		Object:              v3.ForwardingDecisionRow{},
@@ -130,7 +131,7 @@ func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
 	for offset := 0; offset < totalIterations; offset++ {
 		sourceStreamer := pipeline.NewClickHouseRowStreamer[v3.GrouppedForwardingDecisionResultsRow](ctx, clickHouseClient)
 		ingestCh := sourceStreamer.Ingest(&queries.GrouppedForwardingDecisionSelectQuery{
-			TableName:   sourceTableName,
+			TableName:   routeTraceTable,
 			PrefixTable: prefixTable,
 			Database:    clickHouseClient.Database,
 			Limit:       numPrefixesPerChunk,
@@ -142,7 +143,7 @@ func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
 
 		destinationStreamer := pipeline.NewClickHouseRowStreamer[v3.ForwardingDecisionRow](ctx, clickHouseClient)
 		destinationStreamer.Egress(processCh, &queries.BasicInsertQuery{
-			TableName: destinationTableName,
+			TableName: forwardingDecisionTable,
 			Database:  clickHouseClient.Database,
 			Object:    v3.ForwardingDecisionRow{},
 		}, 1)
@@ -162,14 +163,15 @@ func processForwardingDecisionCmd(cmd *cobra.Command, args []string) {
 }
 
 func processPrefixesCmd(cmd *cobra.Command, args []string) {
-	if len(args) < 2 {
-		logger.Printf("Process command requires at least 2 arguments, got %d", len(args))
+	if len(args) < 1 {
+		logger.Printf("Process command requires 1 argument, got %d", len(args))
 		return
 	}
 	force := viper.GetBool("force")
 	clickHouseDSNString := viper.GetString("dsn")
-	sourceTableName := args[0]
-	destinationTableName := args[1]
+	stemName := args[0]
+	routeTraceTable := fmt.Sprintf("%s__rt", stemName)
+	prefixTable := fmt.Sprintf("%s__pf", stemName)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -182,7 +184,7 @@ func processPrefixesCmd(cmd *cobra.Command, args []string) {
 
 	logger.Println("Database health check positive.")
 
-	if tableSize, err := clickHouseClient.TableSize(ctx, destinationTableName); err != nil {
+	if tableSize, err := clickHouseClient.TableSize(ctx, prefixTable); err != nil {
 		logger.Errorf("Destination ClickHouse database table check failed: %v.\n", err)
 		return
 	} else if tableSize > 0 && !force {
@@ -192,11 +194,11 @@ func processPrefixesCmd(cmd *cobra.Command, args []string) {
 
 	destinationManager := pipeline.NewClickHouseManager[v3.PFRow](ctx, clickHouseClient)
 	err = destinationManager.DeleteThenCreate(&queries.BasicDeleteQuery{
-		TableName:       destinationTableName,
+		TableName:       prefixTable,
 		AddCheckIfExist: true,
 		Database:        clickHouseClient.Database,
 	}, &queries.BasicCreateQuery{
-		TableName:           destinationTableName,
+		TableName:           prefixTable,
 		AddCheckIfNotExists: true,
 		Database:            clickHouseClient.Database,
 		Object:              v3.PFRow{},
@@ -209,8 +211,8 @@ func processPrefixesCmd(cmd *cobra.Command, args []string) {
 	logger.Println("Started processing.")
 
 	if err := destinationManager.Execute(&queries.InsertFromUniquePrefixes{
-		TableNameToInsert: destinationTableName,
-		TableNameToSelect: sourceTableName,
+		TableNameToInsert: prefixTable,
+		TableNameToSelect: routeTraceTable,
 		Database:          clickHouseClient.Database,
 	}); err != nil {
 		logger.Errorf("ClickHouse insert failed: %v.\n", err)
@@ -221,14 +223,15 @@ func processPrefixesCmd(cmd *cobra.Command, args []string) {
 }
 
 func processScoresCmd(cmd *cobra.Command, args []string) {
-	if len(args) < 2 {
-		logger.Printf("Process command requires at least 2 arguments, got %d", len(args))
+	if len(args) < 1 {
+		logger.Printf("Process command requires 1 argument, got %d", len(args))
 		return
 	}
 	force := viper.GetBool("force")
 	clickHouseDSNString := viper.GetString("dsn")
-	sourceTableName := args[0]
-	destinationTableName := args[1]
+	stemName := args[0]
+	forwardingDecisionTable := fmt.Sprintf("%s__fd", stemName)
+	scoreTable := fmt.Sprintf("%s__sc", stemName)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -241,7 +244,7 @@ func processScoresCmd(cmd *cobra.Command, args []string) {
 
 	logger.Println("Database health check positive.")
 
-	if tableSize, err := clickHouseClient.TableSize(ctx, destinationTableName); err != nil {
+	if tableSize, err := clickHouseClient.TableSize(ctx, scoreTable); err != nil {
 		logger.Errorf("Destination ClickHouse database table check failed: %v.\n", err)
 		return
 	} else if tableSize > 0 && !force {
@@ -251,11 +254,11 @@ func processScoresCmd(cmd *cobra.Command, args []string) {
 
 	destinationManager := pipeline.NewClickHouseManager[v3.ScoresRow](ctx, clickHouseClient)
 	err = destinationManager.DeleteThenCreate(&queries.BasicDeleteQuery{
-		TableName:       destinationTableName,
+		TableName:       scoreTable,
 		AddCheckIfExist: true,
 		Database:        clickHouseClient.Database,
 	}, &queries.BasicCreateQuery{
-		TableName:           destinationTableName,
+		TableName:           scoreTable,
 		AddCheckIfNotExists: true,
 		Database:            clickHouseClient.Database,
 		Object:              v3.ScoresRow{},
@@ -268,8 +271,8 @@ func processScoresCmd(cmd *cobra.Command, args []string) {
 	logger.Println("Started processing.")
 
 	if err := destinationManager.Execute(&queries.InsertFromScores{
-		TableNameToInsert: destinationTableName,
-		TableNameToSelect: sourceTableName,
+		TableNameToInsert: scoreTable,
+		TableNameToSelect: forwardingDecisionTable,
 		Database:          clickHouseClient.Database,
 	}); err != nil {
 		logger.Errorf("ClickHouse insert failed: %v.\n", err)

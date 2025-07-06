@@ -21,15 +21,14 @@ log() {
 }
 
 process_for_table() {
-    local table="$1"
-    local newtable="fd_${table}"
+    local stem="$1"
 
-    log "Processing from ${table} to "
-    mpat_command process "${MODE}" "${table}" "${newtable}"
+    log "Processing ${stem}"
+    mpat_command process "${MODE}" "${stem}"
     local command_status=$?
 
     if [[ $command_status -ne 0 ]]; then
-        log "${table} failed with code ${command_status}" >&2
+        log "${stem} failed with code ${command_status}" >&2
     fi
 }
 
@@ -103,8 +102,8 @@ main() {
     parse_args "$@"
     read_dates
 
-    for date in "${TABLES[@]}"; do
-        process_for_table "$date"
+    for stem in "${TABLES[@]}"; do
+        process_for_table "$stem"
     done
 
     log "All processes completed"
