@@ -38,3 +38,6 @@ const (
 
 	DefaultIrisctlJWTPath = ".iris/jwt"
 )
+
+// IP specific
+const NumPublicIPv4Addresses = 3706452992

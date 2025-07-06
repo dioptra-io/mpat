@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/viper"
 
 	clientv3 "github.com/dioptra-io/ufuk-research/pkg/client/v3"
+	"github.com/dioptra-io/ufuk-research/pkg/config"
 	"github.com/dioptra-io/ufuk-research/pkg/util"
 )
 
@@ -48,16 +49,19 @@ func processCmd(cmd *cobra.Command, args []string) {
 	logger.Printf("Running for table %s.\n", traceTable)
 
 	metricQueryMapOfRT := map[string]string{
-		"num_routetrace_records":   "SELECT count(*) FROM %s.%s",
-		"num_discovered_addresses": "SELECT count(DISTINCT reply_src_addr) FROM %s.%s",
-		"num_vps":                  "SELECT count(DISTINCT probe_src_addr) FROM %s.%s WHERE startsWith(toString(probe_src_addr), '::ffff:')",
+		"num_routetrace_records":             "SELECT count(*) FROM %s.%s",
+		"num_discovered_addresses":           "SELECT count(DISTINCT reply_src_addr) FROM %s.%s",
+		"num_vps":                            "SELECT count(DISTINCT probe_src_addr) FROM %s.%s WHERE startsWith(toString(probe_src_addr), '::ffff:')",
+		"num_prefix_routetraces":             "SELECT count(DISTINCT probe_src_addr, probe_dst_prefix) FROM %s.%s WHERE startsWith(toString(probe_src_addr), '::ffff:')",
+		"num_unique_routetrace_dst_prefixes": "SELECT count(DISTINCT probe_dst_prefix) FROM %s.%s",
 	}
 
 	metricQueryMapOfFD := map[string]string{
-		"num_fdecision_records":            "SELECT count(*) FROM %s.%s",
-		"num_unique_near_addresses":        "SELECT count(DISTINCT near_addr) FROM %s.%s",
-		"num_unique_far_addresses":         "SELECT count(DISTINCT far_addr) FROM %s.%s",
-		"num_unique_fdecisions_discovered": "SELECT count(DISTINCT near_addr, far_addr, probe_dst_prefix) FROM %s.%s",
+		"num_fdecision_records":         "SELECT count(*) FROM %s.%s",
+		"num_unique_near_addresses":     "SELECT count(DISTINCT near_addr) FROM %s.%s",
+		"num_unique_far_addresses":      "SELECT count(DISTINCT far_addr) FROM %s.%s",
+		"num_unique_finfo_dst_prefixes": "SELECT count(DISTINCT probe_dst_prefix) FROM %s.%s",
+		"num_unique_finfo_discovered":   "SELECT count(DISTINCT near_addr, far_addr, probe_dst_prefix) FROM %s.%s",
 	}
 
 	valuesMapOfRT, err := runQueries(ctx, clickHouseClient, traceTable, metricQueryMapOfRT)
@@ -74,18 +78,33 @@ func processCmd(cmd *cobra.Command, args []string) {
 
 	periodSeconds := uint64(24 * 60 * 60)
 	numVPs := (valuesMapOfRT["num_vps"]).(uint64)
-	probeRatePerVP := float64(valuesMapOfRT["num_routetrace_records"].(uint64)) / float64(numVPs*periodSeconds)
+	probeRate := float64(valuesMapOfRT["num_routetrace_records"].(uint64)) / float64(periodSeconds)
+	probeRatePerVP := probeRate / float64(numVPs)
+	finfoRate := float64(valuesMapOfFD["num_unique_finfo_discovered"].(uint64)) / float64(periodSeconds)
+	finfoRatePerVP := finfoRate / float64(numVPs)
+	finfoDiscoveryEfficiency := float64(valuesMapOfFD["num_unique_finfo_discovered"].(uint64)) / float64(valuesMapOfRT["num_routetrace_records"].(uint64))
+	ipSpaceDiscoveryRate := 256 * float64(valuesMapOfFD["num_unique_finfo_dst_prefixes"].(uint64)) / float64(config.NumPublicIPv4Addresses)
+	ipSpaceProbeRate := 256 * float64(valuesMapOfRT["num_unique_routetrace_dst_prefixes"].(uint64)) / float64(config.NumPublicIPv4Addresses)
 
 	valuesMapOfAll := util.MergeMaps(util.MergeMaps(valuesMapOfFD, valuesMapOfRT), map[string]any{
-		"period_seconds":                 periodSeconds,
-		"probing_rate_per_second_per_vp": probeRatePerVP,
+		"period_seconds":              periodSeconds,
+		"probing_rate":                probeRate,
+		"probing_rate_per_vp":         probeRatePerVP,
+		"finfo_discovery_rate":        finfoRate,
+		"finfo_discovery_rate_per_vp": finfoRatePerVP,
+		"finfo_discovery_efficiency":  finfoDiscoveryEfficiency,
+
+		// ratio of # of dst prefixes where we know there is a near and far address to the ipv4
+		// public address space
+		"ratio_ipv4_space_discovered_finfo": ipSpaceDiscoveryRate,
+		"ratio_ipv4_space_probed":           ipSpaceProbeRate,
 	})
 
 	valuesMap := map[string]any{
-		"mpat_version":    viper.GetString("version"),
-		"routetrace_name": traceTable,
-		"fdecision_name":  decisionTable,
-		"metrics":         valuesMapOfAll,
+		"mpat_version":     viper.GetString("version"),
+		"routetrace_table": traceTable,
+		"fd_table":         decisionTable,
+		"metrics":          valuesMapOfAll,
 	}
 
 	data, err := json.Marshal(valuesMap)
