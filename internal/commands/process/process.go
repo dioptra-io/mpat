@@ -229,7 +229,7 @@ func processPrefixesCmd(cmd *cobra.Command, args []string) {
 }
 
 func processScoresCmd(cmd *cobra.Command, args []string) {
-	if len(args) < 1 {
+	if len(args) != 1 {
 		logger.Printf("Process command requires 1 argument, got %d", len(args))
 		return
 	}

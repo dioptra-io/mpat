@@ -17,7 +17,7 @@ var logger = util.GetLogger()
 
 func MetricsCmd() *cobra.Command {
 	metricsCmd := &cobra.Command{
-		Use:   "metrics <rt table> <fd table>",
+		Use:   "metrics <stem>",
 		Short: "Compute metrics.",
 		Long:  "Compute the metrics and present them as a table",
 		Run:   processCmd,
@@ -27,13 +27,14 @@ func MetricsCmd() *cobra.Command {
 }
 
 func processCmd(cmd *cobra.Command, args []string) {
-	if len(args) != 2 {
+	if len(args) != 1 {
 		cmd.Help()
 		return
 	}
 	clickHouseDSNString := viper.GetString("dsn")
-	traceTable := args[0]
-	decisionTable := args[1]
+	stemName := args[0]
+	routeTraceTable := fmt.Sprintf("%s__rt", stemName)
+	forwardingDecisionTable := fmt.Sprintf("%s__fd", stemName)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -46,7 +47,7 @@ func processCmd(cmd *cobra.Command, args []string) {
 
 	logger.Println("Database health check positive.")
 
-	logger.Printf("Running for table %s.\n", traceTable)
+	logger.Printf("Running for table %s.\n", routeTraceTable)
 
 	metricQueryMapOfRT := map[string]string{
 		"num_routetrace_records":             "SELECT count(*) FROM %s.%s",
@@ -64,13 +65,13 @@ func processCmd(cmd *cobra.Command, args []string) {
 		"num_unique_finfo_discovered":   "SELECT count(DISTINCT near_addr, far_addr, probe_dst_prefix) FROM %s.%s",
 	}
 
-	valuesMapOfRT, err := runQueries(ctx, clickHouseClient, traceTable, metricQueryMapOfRT)
+	valuesMapOfRT, err := runQueries(ctx, clickHouseClient, routeTraceTable, metricQueryMapOfRT)
 	if err != nil {
 		logger.Errorf("An error occured while computing metrics: %v.\n", err)
 		return
 	}
 
-	valuesMapOfFD, err := runQueries(ctx, clickHouseClient, decisionTable, metricQueryMapOfFD)
+	valuesMapOfFD, err := runQueries(ctx, clickHouseClient, forwardingDecisionTable, metricQueryMapOfFD)
 	if err != nil {
 		logger.Errorf("An error occured while computing metrics: %v.\n", err)
 		return
@@ -102,8 +103,8 @@ func processCmd(cmd *cobra.Command, args []string) {
 
 	valuesMap := map[string]any{
 		"mpat_version":     viper.GetString("version"),
-		"routetrace_table": traceTable,
-		"fd_table":         decisionTable,
+		"routetrace_table": routeTraceTable,
+		"fd_table":         forwardingDecisionTable,
 		"metrics":          valuesMapOfAll,
 	}
 

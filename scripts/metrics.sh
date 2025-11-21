@@ -4,15 +4,15 @@ set -euo pipefail
 
 TABLES=()
 tablesfile=""
+jsonlfile=""
 DRYRUN=false
-MODE="forwarding-decision"
 
 mpat_command() {
     if $DRYRUN; then
         log "[dry-run] mpat $*"
         sleep 1
     else
-        mpat "$@" || true
+        mpat "$@" --silent >> "${jsonlfile}" || true
     fi
 }
 
@@ -24,7 +24,7 @@ process_for_table() {
     local stem="$1"
 
     log "Processing ${stem}"
-    mpat_command process "${MODE}" "${stem}"
+    mpat_command metrics "${stem}"
     local command_status=$?
 
     if [[ $command_status -ne 0 ]]; then
@@ -60,14 +60,9 @@ parse_args() {
         log "Error: not enough arguments" >&2
         exit 1
     fi
-
-    if [[ "$MODE" != "forwarding-decision" && "$MODE" != "prefixes" && "$MODE" != "scores"  ]]; then
-        log "Error: invalid mode '$MODE'. Expected one of 'forwarding-decision', 'prefixes', 'scores'." >&2
-        exit 1
-    fi
     
-    MODE="${positional[0]}"
-    tablesfile="${positional[1]}"
+    tablesfile="${positional[0]}"
+    jsonlfile="${positional[1]}"
 }
 
 read_dates() {
@@ -85,16 +80,16 @@ check_mpat_command() {
 
 print_help() {
     cat <<EOF
-Usage: $0 <forwarding-decision|prefixes|scores> <stemfile> [--dry-run]
+Usage: $0 <stemfile> <jsonlfile> [--dry-run]
 
 Arguments:
-  forwarding-decision|prefixes|scores       Required. Mode to use.
   stemfile                                  Required. Path to file with one stem per line.
+  jsonlfile                                 Required. Path to the output file format jsonl.
   --dry-run                                 Optional. Simulates commands instead of running them.
   -h, --help                                Show this help message.
 
 Example:
-  $0 iris ./dates.txt --dry-run
+  $0 stems.txt output.jsonl --dry-run
 EOF
 }
 
