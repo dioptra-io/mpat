@@ -312,7 +312,7 @@ func currentCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
-	cmd.Flags().BoolVar(&showTasks, "tasks", false, "Show full task details")
+	cmd.Flags().BoolVar(&showTasks, "tasks", true, "Show full task details")
 
 	return cmd
 }
