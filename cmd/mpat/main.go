@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/dioptra-io/ufuk-research/internal/commands/queue"
 	"github.com/dioptra-io/ufuk-research/internal/commands/serve"
 	"github.com/dioptra-io/ufuk-research/internal/log"
 	"github.com/sirupsen/logrus"
@@ -77,6 +78,7 @@ func main() {
 	// Add commands there
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(serve.ServeCmd())
+	rootCmd.AddCommand(queue.QueueCmd())
 
 	// Add the silent and debug flag
 	rootCmd.PersistentFlags().Bool("debug", false, "see debug messages")

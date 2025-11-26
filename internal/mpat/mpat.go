@@ -78,6 +78,15 @@ type MPAT interface {
 
 	// Sets the priority of a command, this would not stop the if a task of this command is running.
 	SetPriority(commandID uint, p uint) error
+
+	// ListCommands returns all commands
+	ListCommands() ([]api.Command, error)
+
+	// ListAllTasks returns all tasks across all commands
+	ListAllTasks() ([]api.Task, error)
+
+	// ListTasksForCommand returns all tasks for a specific command
+	ListTasksForCommand(commandID uint) ([]api.Task, error)
 }
 
 // Creates an instance of MPAT object which uses an sqlite database. The path can also be in memory.
@@ -564,4 +573,31 @@ func (m *mpat) SetPriority(commandID uint, p uint) error {
 	}
 
 	return nil
+}
+
+// ListCommands returns all commands
+func (m *mpat) ListCommands() ([]api.Command, error) {
+	var commands []api.Command
+	if err := m.db.Preload("Tasks").Find(&commands).Error; err != nil {
+		return nil, fmt.Errorf("failed to list commands: %w", err)
+	}
+	return commands, nil
+}
+
+// ListAllTasks returns all tasks across all commands
+func (m *mpat) ListAllTasks() ([]api.Task, error) {
+	var tasks []api.Task
+	if err := m.db.Find(&tasks).Error; err != nil {
+		return nil, fmt.Errorf("failed to list tasks: %w", err)
+	}
+	return tasks, nil
+}
+
+// ListTasksForCommand returns all tasks for a specific command
+func (m *mpat) ListTasksForCommand(commandID uint) ([]api.Task, error) {
+	var tasks []api.Task
+	if err := m.db.Where("command_id = ?", commandID).Find(&tasks).Error; err != nil {
+		return nil, fmt.Errorf("failed to list tasks for command %d: %w", commandID, err)
+	}
+	return tasks, nil
 }

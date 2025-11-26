@@ -68,7 +68,7 @@ func (n *ingestNode) OnTaskRun(ctx context.Context, c *api.Command, t *api.Task)
 			return ctx.Err()
 		default:
 			logger.Infof("[Ingest] Task %d progress: %d/10", t.ID, i+1)
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(5000 * time.Millisecond)
 		}
 	}
 

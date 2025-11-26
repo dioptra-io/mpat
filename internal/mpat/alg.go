@@ -350,15 +350,18 @@ func (m *mpat) executeTask(parentCtx context.Context, command *api.Command, task
 	// Update task status based on result
 	if err != nil {
 		if taskCtx.Err() == context.Canceled {
-			// Task was cancelled
+			// Task was cancelled - don't set finish time
 			task.Status = api.StatusIdle
+			task.FinishedAt = time.Time{} // Clear finish time
 		} else {
-			// Task failed
+			// Task failed - set finish time
 			task.Status = api.StatusFailed
+			task.FinishedAt = time.Now()
 		}
 	} else {
 		// Task completed successfully
 		task.Status = api.StatusDone
+		task.FinishedAt = time.Now()
 	}
 
 	if err := m.db.Save(task).Error; err != nil {

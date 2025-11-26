@@ -41,6 +41,16 @@ func ServeCmd() *cobra.Command {
 }
 
 func serveCmdRun(cmd *cobra.Command, args []string, dbPath string) {
+	// Get debug flag value
+	debug, _ := cmd.Flags().GetBool("debug")
+
+	// Set Gin mode based on debug flag
+	if debug {
+		gin.SetMode(gin.DebugMode)
+	} else {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
 	logger.Debugln("Starting the server.")
 
 	// Initialize MPAT
@@ -143,12 +153,17 @@ func setupRouter(serverCtx *ServerContext) *gin.Engine {
 	api := r.Group("/api/v1")
 	{
 		// Commands
+		api.GET("/commands", serverCtx.listCommands)
 		api.POST("/commands", serverCtx.enqueueCommand)
 		api.GET("/commands/:id", serverCtx.getCommand)
 		api.DELETE("/commands/:id", serverCtx.dequeueCommand)
 		api.POST("/commands/:id/requeue", serverCtx.requeueCommand)
 		api.PUT("/commands/:id/priority", serverCtx.setPriority)
 		api.GET("/commands/current", serverCtx.getCurrentCommand)
+
+		// Tasks
+		api.GET("/tasks", serverCtx.listAllTasks)
+		api.GET("/commands/:id/tasks", serverCtx.listCommandTasks)
 
 		// Status
 		api.GET("/status", serverCtx.getStatus)
@@ -285,4 +300,43 @@ func (s *ServerContext) getStatus(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, status)
+}
+
+// Handler: List all commands
+func (s *ServerContext) listCommands(ctx *gin.Context) {
+	commands, err := s.mpat.ListCommands()
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, commands)
+}
+
+// Handler: List all tasks across all commands
+func (s *ServerContext) listAllTasks(ctx *gin.Context) {
+	tasks, err := s.mpat.ListAllTasks()
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, tasks)
+}
+
+// Handler: List tasks for a specific command
+func (s *ServerContext) listCommandTasks(ctx *gin.Context) {
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 32)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid command id"})
+		return
+	}
+
+	tasks, err := s.mpat.ListTasksForCommand(uint(id))
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, tasks)
 }

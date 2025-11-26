@@ -79,7 +79,7 @@ type Command struct {
 	Priority uint `json:"priority"`
 
 	// Params for additional information.
-	Params string `json:"payload"`
+	Params string `json:"params"`
 
 	// All processes connected to this.
 	// NOTE: Not stored in DB — populated manually for JSON responses.
@@ -112,6 +112,9 @@ type Task struct {
 
 	// Creation time.
 	CreatedAt time.Time `json:"created_at"`
+
+	// Finish time.
+	FinishedAt time.Time `json:"finished_at"`
 
 	// Status of the process.
 	Status Status `json:"status"`
