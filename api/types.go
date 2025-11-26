@@ -95,6 +95,10 @@ type Command struct {
 	Active bool `json:"active"`
 }
 
+func (Command) TableName() string {
+	return "commands"
+}
+
 // Tasks are spawned for each command and for each node.
 type Task struct {
 	// ID of the process.
@@ -117,4 +121,8 @@ type Task struct {
 
 	// Orphan marks tasks whose node no longer exists
 	Orphan bool `json:"orphan"`
+}
+
+func (Task) TableName() string {
+	return "tasks"
 }

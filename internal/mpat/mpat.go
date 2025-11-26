@@ -7,9 +7,12 @@ import (
 	"sync"
 
 	"github.com/dioptra-io/ufuk-research/api"
+	"github.com/dioptra-io/ufuk-research/internal/log"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+var logger = log.GetLogger()
 
 // Node is also known as a processing Node. It defines a name and some operations. It is a generalization. In MPAT it is
 // used to ingress data from different sources, or to run chunked ClickHouse queries to generate database tables.
@@ -62,7 +65,7 @@ type MPAT interface {
 	RequeueCommand(commandID uint) (*api.Command, error)
 
 	// Starts the execution loop in a separate go routine.
-	Start() error
+	Start(ctx context.Context) error
 
 	// Gracefully stops the queue.
 	Stop() error
@@ -85,10 +88,11 @@ func NewMPAT(path string) (MPAT, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	// Run auto-migrations for the required tables
+	logger.Infoln("Running migrations...")
 	if err := db.AutoMigrate(&api.Command{}, &api.Task{}); err != nil {
 		return nil, fmt.Errorf("failed to auto-migrate database: %w", err)
 	}
+	logger.Infoln("Migrations complete")
 
 	// Initialize the mpat struct
 	m := &mpat{
@@ -104,6 +108,9 @@ func NewMPAT(path string) (MPAT, error) {
 		currentCommandID:            0,
 		currentTaskNodeNamedVersion: api.NamedVersion{},
 		runningTask:                 false,
+		started:                     false,
+		stopChan:                    make(chan struct{}),
+		stoppedChan:                 make(chan struct{}),
 	}
 
 	return m, nil
@@ -144,6 +151,11 @@ type mpat struct {
 
 	// Mutex for thread-safe access
 	mu sync.RWMutex
+
+	// Fields for execution control
+	started     bool
+	stopChan    chan struct{}
+	stoppedChan chan struct{}
 }
 
 // Adds a new processing node to the queue with the specified dependencies. It returns an error if the node with that
@@ -159,7 +171,8 @@ func (m *mpat) RegisterNode(n Node, deps ...api.NamedVersion) error {
 
 	// Check if node already exists
 	if _, exists := m.nodes[nv]; exists {
-		return fmt.Errorf("node with named version %v already exists", nv)
+		logger.Infof("node with named version %v already exists", nv)
+		return nil
 	}
 
 	// Remove duplicate dependencies
@@ -265,8 +278,14 @@ func (m *mpat) DequeueCommand(commandID uint) error {
 	}
 
 	// Check if command is in the active queue
-	if !slices.Contains(m.activeQueue, commandID) {
-		return fmt.Errorf("command %d is not in the active queue", commandID)
+	// Check if command is in the active queue (needs lock for read)
+	m.mu.Lock()
+	inQueue := slices.Contains(m.activeQueue, commandID)
+	m.mu.Unlock()
+
+	if !inQueue {
+		logger.Infof("command %d is not in the active queue", commandID)
+		return nil
 	}
 
 	// Get the command from database
@@ -275,27 +294,31 @@ func (m *mpat) DequeueCommand(commandID uint) error {
 		return fmt.Errorf("failed to find command %d: %w", commandID, err)
 	}
 
-	m.mu.Lock()
-	// If this command has a currently running task, cancel it
-	if m.runningTask && m.currentCommandID == commandID {
-		if m.currentTaskCancel != nil {
-			m.currentTaskCancel()
-			m.currentTaskCancel = nil
-		}
-		m.runningTask = false
-		m.currentCommandID = 0
-		m.currentTaskNodeNamedVersion = api.NamedVersion{}
-	}
-	m.mu.Unlock()
+	// Use a function with defer for the critical section
+	func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
 
-	// Remove command from active queue
-	newQueue := make([]uint, 0, len(m.activeQueue)-1)
-	for _, id := range m.activeQueue {
-		if id != commandID {
-			newQueue = append(newQueue, id)
+		// If this command has a currently running task, cancel it
+		if m.runningTask && m.currentCommandID == commandID {
+			if m.currentTaskCancel != nil {
+				m.currentTaskCancel()
+				m.currentTaskCancel = nil
+			}
+			m.runningTask = false
+			m.currentCommandID = 0
+			m.currentTaskNodeNamedVersion = api.NamedVersion{}
 		}
-	}
-	m.activeQueue = newQueue
+
+		// Remove command from active queue
+		newQueue := make([]uint, 0, len(m.activeQueue)-1)
+		for _, id := range m.activeQueue {
+			if id != commandID {
+				newQueue = append(newQueue, id)
+			}
+		}
+		m.activeQueue = newQueue
+	}()
 
 	// Mark command as inactive
 	command.Active = false
@@ -366,7 +389,8 @@ func (m *mpat) RequeueCommand(commandID uint) (*api.Command, error) {
 
 	// Check if command is already in the active queue
 	if slices.Contains(m.activeQueue, commandID) {
-		return nil, fmt.Errorf("command %d is already in the active queue", commandID)
+		logger.Infof("command %d is already in the active queue", commandID)
+		return nil, nil
 	}
 
 	// Mark command as active
@@ -468,12 +492,39 @@ func (m *mpat) RequeueCommand(commandID uint) (*api.Command, error) {
 }
 
 // Start starts the execution loop in a separate go routine.
-func (m *mpat) Start() error {
+func (m *mpat) Start(ctx context.Context) error {
+	m.mu.Lock()
+	if m.started {
+		m.mu.Unlock()
+		return fmt.Errorf("execution loop is already running")
+	}
+	if !m.frozen {
+		m.mu.Unlock()
+		return fmt.Errorf("cannot start: dependencies must be frozen first")
+	}
+	m.started = true
+	m.mu.Unlock()
+
+	go m.run(ctx)
+
 	return nil
 }
 
 // Stop gracefully stops the queue.
 func (m *mpat) Stop() error {
+	m.mu.Lock()
+	if !m.started {
+		m.mu.Unlock()
+		return fmt.Errorf("execution loop is not running")
+	}
+	m.mu.Unlock()
+
+	// Signal stop
+	close(m.stopChan)
+
+	// Wait for execution loop to stop
+	<-m.stoppedChan
+
 	return nil
 }
 

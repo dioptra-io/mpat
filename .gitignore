@@ -2,3 +2,5 @@
 build/mpat
 research
 .old
+mpat.db
+main.go
