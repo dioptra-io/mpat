@@ -1,6 +1,8 @@
 package api
 
 import (
+	"database/sql/driver"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -28,27 +30,43 @@ const (
 // Represents a node and a verison. It is written as <node-name>/v<node-version>. For example:
 // "ingestion_node/v2".
 type NamedVersion struct {
-	name    string
-	version uint
+	Name    string `json:"name"`
+	Version uint   `json:"version"`
 }
 
 func NewNamedVersion(name string, version uint) NamedVersion {
 	return NamedVersion{
-		name:    name,
-		version: version,
+		Name:    name,
+		Version: version,
 	}
 }
 
-func (nv NamedVersion) Name() string {
-	return nv.name
+// Value implements the driver.Valuer interface for GORM
+func (nv NamedVersion) Value() (driver.Value, error) {
+	return json.Marshal(nv)
 }
 
-func (nv NamedVersion) Version() uint {
-	return nv.version
+// Scan implements the sql.Scanner interface for GORM
+func (nv *NamedVersion) Scan(value any) error {
+	if value == nil {
+		return nil
+	}
+
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return fmt.Errorf("failed to scan NamedVersion: unsupported type %T", value)
+	}
+
+	return json.Unmarshal(bytes, nv)
 }
 
 func (nv NamedVersion) String() string {
-	return fmt.Sprintf("%s/v%d", nv.name, nv.version)
+	return fmt.Sprintf("%s/v%d", nv.Name, nv.Version)
 }
 
 // A command is run with parameters which spawns processes to run for each node. Then the server

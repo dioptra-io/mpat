@@ -21,13 +21,19 @@ type Node interface {
 	GetDefaultTaskParams(c *api.Command) string
 
 	// This is invoked when the task is being run. There are also some other handlers.
-	OnTaskRun(ctx context.Context, c *api.Command, t *api.Task) (int, error)
+	OnTaskRun(ctx context.Context, c *api.Command, t *api.Task) error
 
 	// This is invoked when a task is loaded during requeue with its previous state.
 	OnTaskLoad(ctx context.Context, c *api.Command, t *api.Task, prevState api.Status) error
 
 	// This is invoked when a task is created during requeue or enqueue.
 	OnTaskCreate(ctx context.Context, c *api.Command, t *api.Task, enqueue bool) error
+
+	// This is invoked when a command is dequeued and the task was idle (stopped).
+	OnTaskStopped(ctx context.Context, c *api.Command, t *api.Task) error
+
+	// This is invoked when a command is dequeued and the task was running (interrupted).
+	OnTaskInterrupted(ctx context.Context, c *api.Command, t *api.Task) error
 }
 
 // This is the task queue. The usage is that the nodes are added and then the dependencies are frozen to perform the
@@ -53,13 +59,7 @@ type MPAT interface {
 	DequeueCommand(commandID uint) error
 
 	// Adds the command to the queue again, marks its tasks are idle, marks the command as active.
-	RequeueCommand(commandID uint) error
-
-	// Stops the currently running task if it is waiting, and marks it as waiting.
-	StopTask() error
-
-	// Marks the task as idle if it is in state waiting.
-	ResumeTask(commandID uint, nodeNamedVersion api.NamedVersion) error
+	RequeueCommand(commandID uint) (*api.Command, error)
 
 	// Starts the execution loop in a separate go routine.
 	Start() error
@@ -236,7 +236,7 @@ func (m *mpat) AreDepsFrozen() bool {
 }
 
 // EnqueueCommand adds a command to the queue with the given params and the priority.
-func (m *mpat) EnqueueCommand(params string, p uint) (*api.Command, error) {
+func (m *mpat) EnqueueCommand(params string, priority uint) (*api.Command, error) {
 	// Check if dependencies are frozen
 	if !m.frozen {
 		return nil, fmt.Errorf("cannot enqueue command: dependencies must be frozen first")
@@ -245,52 +245,28 @@ func (m *mpat) EnqueueCommand(params string, p uint) (*api.Command, error) {
 	// Create a new command
 	command := &api.Command{
 		Params:   params,
-		Priority: p,
-		Active:   true,
+		Priority: priority,
+		Active:   false, // Set to false initially, RequeueCommand will set it to true
 	}
 
-	// Save command to database
 	if err := m.db.Create(command).Error; err != nil {
 		return nil, fmt.Errorf("failed to create command in database: %w", err)
 	}
 
-	// Add command ID to active queue
-	m.activeQueue = append(m.activeQueue, command.ID)
-
-	// Create tasks for all nodes
-	for nv, node := range m.nodes {
-		task := &api.Task{
-			CommandID:        command.ID,
-			NodeNamedVersion: nv,
-			Status:           api.StatusIdle,
-
-			// Get the task's params from node's implementation
-			Params: node.GetDefaultTaskParams(command),
-		}
-
-		if err := m.db.Create(task).Error; err != nil {
-			return nil, fmt.Errorf("failed to create task for node %v: %w", nv, err)
-		}
-
-		// Call OnTaskCreate (enqueue=true for new enqueue)
-		if err := node.OnTaskCreate(context.Background(), command, task, true); err != nil {
-			return nil, fmt.Errorf("failed to call OnTaskCreate for node %v: %w", nv, err)
-		}
-	}
-
-	return command, nil
+	// Requeue the command to create tasks and add to active queue
+	return m.RequeueCommand(command.ID)
 }
 
 // DequeueCommand removes the command from the queue, stops all its running tasks.
 func (m *mpat) DequeueCommand(commandID uint) error {
-	return nil
-}
-
-// RequeueCommand adds the command to the queue again, marks its tasks as idle, marks the command as active.
-func (m *mpat) RequeueCommand(commandID uint) error {
 	// Check if dependencies are frozen
 	if !m.frozen {
-		return fmt.Errorf("cannot requeue command: dependencies must be frozen first")
+		return fmt.Errorf("cannot dequeue command: dependencies must be frozen first")
+	}
+
+	// Check if command is in the active queue
+	if !slices.Contains(m.activeQueue, commandID) {
+		return fmt.Errorf("command %d is not in the active queue", commandID)
 	}
 
 	// Get the command from database
@@ -299,15 +275,104 @@ func (m *mpat) RequeueCommand(commandID uint) error {
 		return fmt.Errorf("failed to find command %d: %w", commandID, err)
 	}
 
+	m.mu.Lock()
+	// If this command has a currently running task, cancel it
+	if m.runningTask && m.currentCommandID == commandID {
+		if m.currentTaskCancel != nil {
+			m.currentTaskCancel()
+			m.currentTaskCancel = nil
+		}
+		m.runningTask = false
+		m.currentCommandID = 0
+		m.currentTaskNodeNamedVersion = api.NamedVersion{}
+	}
+	m.mu.Unlock()
+
+	// Remove command from active queue
+	newQueue := make([]uint, 0, len(m.activeQueue)-1)
+	for _, id := range m.activeQueue {
+		if id != commandID {
+			newQueue = append(newQueue, id)
+		}
+	}
+	m.activeQueue = newQueue
+
+	// Mark command as inactive
+	command.Active = false
+	if err := m.db.Save(&command).Error; err != nil {
+		return fmt.Errorf("failed to mark command %d as inactive: %w", commandID, err)
+	}
+
+	// Get all tasks for this command
+	var tasks []api.Task
+	if err := m.db.Where("command_id = ?", commandID).Find(&tasks).Error; err != nil {
+		return fmt.Errorf("failed to load tasks for command %d: %w", commandID, err)
+	}
+
+	// Create context for handlers
+	ctx := context.Background()
+
+	// Process each task
+	for i := range tasks {
+		task := &tasks[i]
+
+		// Skip orphan tasks
+		if task.Orphan {
+			continue
+		}
+
+		// Get the node for this task
+		node, exists := m.nodes[task.NodeNamedVersion]
+		if !exists {
+			continue
+		}
+
+		// Handle based on task status
+		switch task.Status {
+		case api.StatusRunning:
+			// Task was running - mark as idle and call interrupted handler
+			task.Status = api.StatusIdle
+			if err := m.db.Save(task).Error; err != nil {
+				return fmt.Errorf("failed to update task %d: %w", task.ID, err)
+			}
+
+			if err := node.OnTaskInterrupted(ctx, &command, task); err != nil {
+				return fmt.Errorf("failed to call OnTaskInterrupted for task %d: %w", task.ID, err)
+			}
+		case api.StatusIdle:
+			// Task was idle - call stopped handler
+			if err := node.OnTaskStopped(ctx, &command, task); err != nil {
+				return fmt.Errorf("failed to call OnTaskStopped for task %d: %w", task.ID, err)
+			}
+		}
+		// For other statuses (waiting, failed, done), do nothing
+	}
+
+	return nil
+}
+
+// RequeueCommand adds the command to the queue again, marks its tasks as idle, marks the command as active.
+func (m *mpat) RequeueCommand(commandID uint) (*api.Command, error) {
+	// Check if dependencies are frozen
+	if !m.frozen {
+		return nil, fmt.Errorf("cannot requeue command: dependencies must be frozen first")
+	}
+
+	// Get the command from database
+	var command api.Command
+	if err := m.db.First(&command, commandID).Error; err != nil {
+		return nil, fmt.Errorf("failed to find command %d: %w", commandID, err)
+	}
+
 	// Check if command is already in the active queue
 	if slices.Contains(m.activeQueue, commandID) {
-		return fmt.Errorf("command %d is already in the active queue", commandID)
+		return nil, fmt.Errorf("command %d is already in the active queue", commandID)
 	}
 
 	// Mark command as active
 	command.Active = true
 	if err := m.db.Save(&command).Error; err != nil {
-		return fmt.Errorf("failed to mark command %d as active: %w", commandID, err)
+		return nil, fmt.Errorf("failed to mark command %d as active: %w", commandID, err)
 	}
 
 	// Add to active queue
@@ -316,7 +381,7 @@ func (m *mpat) RequeueCommand(commandID uint) error {
 	// Get all tasks for this command
 	var tasks []api.Task
 	if err := m.db.Where("command_id = ?", commandID).Find(&tasks).Error; err != nil {
-		return fmt.Errorf("failed to load tasks for command %d: %w", commandID, err)
+		return nil, fmt.Errorf("failed to load tasks for command %d: %w", commandID, err)
 	}
 
 	// Build a map of existing tasks by NodeNamedVersion
@@ -324,6 +389,9 @@ func (m *mpat) RequeueCommand(commandID uint) error {
 	for i := range tasks {
 		taskMap[tasks[i].NodeNamedVersion] = &tasks[i]
 	}
+
+	// Create a background context for handlers
+	ctx := context.Background()
 
 	// Process all registered nodes
 	for nv, node := range m.nodes {
@@ -350,13 +418,13 @@ func (m *mpat) RequeueCommand(commandID uint) error {
 			// Save task if status changed
 			if task.Status != prevState {
 				if err := m.db.Save(task).Error; err != nil {
-					return fmt.Errorf("failed to update task %d: %w", task.ID, err)
+					return nil, fmt.Errorf("failed to update task %d: %w", task.ID, err)
 				}
 			}
 
-			// Call OnLoad with the previous state
-			if err := node.OnTaskLoad(context.Background(), &command, task, prevState); err != nil {
-				return fmt.Errorf("failed to call OnLoad for task %d: %w", task.ID, err)
+			// Call OnTaskLoad with the previous state
+			if err := node.OnTaskLoad(ctx, &command, task, prevState); err != nil {
+				return nil, fmt.Errorf("failed to call OnTaskLoad for task %d: %w", task.ID, err)
 			}
 
 			// Remove from map so we know it's been processed
@@ -367,17 +435,16 @@ func (m *mpat) RequeueCommand(commandID uint) error {
 				CommandID:        commandID,
 				NodeNamedVersion: nv,
 				Status:           api.StatusIdle,
-				Params:           m.nodes[nv].GetDefaultTaskParams(&command),
+				Params:           node.GetDefaultTaskParams(&command),
 				Orphan:           false,
 			}
-
 			if err := m.db.Create(newTask).Error; err != nil {
-				return fmt.Errorf("failed to create task for node %v: %w", nv, err)
+				return nil, fmt.Errorf("failed to create task for node %v: %w", nv, err)
 			}
 
 			// Call OnTaskCreate (enqueue=false for requeue)
-			if err := node.OnTaskCreate(context.Background(), &command, newTask, false); err != nil {
-				return fmt.Errorf("failed to call OnTaskCreate for new task: %w", err)
+			if err := node.OnTaskCreate(ctx, &command, newTask, false); err != nil {
+				return nil, fmt.Errorf("failed to call OnTaskCreate for new task: %w", err)
 			}
 		}
 	}
@@ -387,89 +454,17 @@ func (m *mpat) RequeueCommand(commandID uint) error {
 		if !task.Orphan {
 			task.Orphan = true
 			if err := m.db.Save(task).Error; err != nil {
-				return fmt.Errorf("failed to mark task %d as orphan: %w", task.ID, err)
+				return nil, fmt.Errorf("failed to mark task %d as orphan: %w", task.ID, err)
 			}
 		}
 	}
 
-	return nil
-}
-
-// StopTask stops the currently running task if it matches the given command and node, and marks it as waiting.
-func (m *mpat) StopTask() error {
-	// Check if dependencies are frozen
-	if !m.frozen {
-		return fmt.Errorf("cannot stop task: dependencies must be frozen first")
+	// Reload the command with tasks preloaded
+	if err := m.db.Preload("Tasks").First(&command, commandID).Error; err != nil {
+		return nil, fmt.Errorf("failed to reload command %d: %w", commandID, err)
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Check if there's a task running
-	if !m.runningTask {
-		return fmt.Errorf("no task is currently running")
-	}
-
-	// Get the current command ID and node named version
-	commandID := m.currentCommandID
-	nodeNamedVersion := m.currentTaskNodeNamedVersion
-
-	// Find the task
-	var task api.Task
-	if err := m.db.Where("command_id = ? AND node_named_version = ?", commandID, nodeNamedVersion).First(&task).Error; err != nil {
-		return fmt.Errorf("failed to find task for command %d and node %v: %w", commandID, nodeNamedVersion, err)
-	}
-
-	// Check if task is orphan
-	if task.Orphan {
-		return fmt.Errorf("cannot stop task %d: task is orphan", task.ID)
-	}
-
-	// Cancel the context
-	if m.currentTaskCancel != nil {
-		m.currentTaskCancel()
-		m.currentTaskCancel = nil
-	}
-
-	// Mark as waiting
-	task.Status = api.StatusWaiting
-	if err := m.db.Save(&task).Error; err != nil {
-		return fmt.Errorf("failed to update task %d to waiting: %w", task.ID, err)
-	}
-
-	// Clear running task state
-	m.runningTask = false
-	m.currentCommandID = 0
-	m.currentTaskNodeNamedVersion = api.NamedVersion{}
-
-	return nil
-}
-
-// ResumeTask marks the task as idle if it is in state waiting.
-func (m *mpat) ResumeTask(commandID uint, nodeNamedVersion api.NamedVersion) error {
-	// Check if dependencies are frozen
-	if !m.frozen {
-		return fmt.Errorf("cannot resume task: dependencies must be frozen first")
-	}
-
-	// Find the task
-	var task api.Task
-	if err := m.db.Where("command_id = ? AND node_named_version = ?", commandID, nodeNamedVersion).First(&task).Error; err != nil {
-		return fmt.Errorf("failed to find task for command %d and node %v: %w", commandID, nodeNamedVersion, err)
-	}
-
-	// Check if task is in waiting state
-	if task.Status != api.StatusWaiting {
-		return fmt.Errorf("cannot resume task %d: task is in state %s, expected waiting", task.ID, task.Status)
-	}
-
-	// Mark as idle
-	task.Status = api.StatusIdle
-	if err := m.db.Save(&task).Error; err != nil {
-		return fmt.Errorf("failed to update task %d to idle: %w", task.ID, err)
-	}
-
-	return nil
+	return &command, nil
 }
 
 // Start starts the execution loop in a separate go routine.
@@ -484,15 +479,38 @@ func (m *mpat) Stop() error {
 
 // GetCurrentCommandID gets the current active command ID.
 func (m *mpat) GetCurrentCommandID() (uint, error) {
-	return 0, nil
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if !m.runningTask {
+		return 0, fmt.Errorf("no task is currently running")
+	}
+
+	return m.currentCommandID, nil
 }
 
 // GetCommand gets the command with the given ID.
 func (m *mpat) GetCommand(commandID uint) (*api.Command, error) {
-	return nil, nil
+	var command api.Command
+	if err := m.db.Preload("Tasks").First(&command, commandID).Error; err != nil {
+		return nil, fmt.Errorf("failed to find command %d: %w", commandID, err)
+	}
+	return &command, nil
 }
 
 // SetPriority sets the priority of a command.
 func (m *mpat) SetPriority(commandID uint, p uint) error {
+	// Get the command from database
+	var command api.Command
+	if err := m.db.First(&command, commandID).Error; err != nil {
+		return fmt.Errorf("failed to find command %d: %w", commandID, err)
+	}
+
+	// Update priority
+	command.Priority = p
+	if err := m.db.Save(&command).Error; err != nil {
+		return fmt.Errorf("failed to update priority for command %d: %w", commandID, err)
+	}
+
 	return nil
 }
