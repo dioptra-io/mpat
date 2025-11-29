@@ -53,6 +53,7 @@ type scheduler struct {
 	nodes       map[api.NamedVersion]Node
 	additiveDAG AdditiveDAG
 	currentCmd  *uint // Pointer to allow nil (no current command)
+	ctx         context.Context
 }
 
 // NewScheduler creates a new scheduler with the given store, queue, and nodes. It builds the dependency graph from the
@@ -168,136 +169,101 @@ func (s *scheduler) ListTasksForCommand(commandID uint) ([]*api.Task, error) {
 }
 
 func (s *scheduler) EnqueueCommand(params string, p uint) (*api.Command, error) {
-	// s.mu.Lock()
-	// defer s.mu.Unlock()
-	//
-	// // Create a new command in the store
-	// cmd, err := s.store.CreateCommand(params)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to create command: %w", err)
-	// }
-	//
-	// // Set priority and status
-	// cmd.Priority = p
-	// cmd.Status = api.CommandStatusActive
-	//
-	// // Save the updated command
-	// if err := s.store.SaveCommand(cmd); err != nil {
-	// 	return nil, fmt.Errorf("failed to save command: %w", err)
-	// }
-	//
-	// // Add to queue with priority
-	// if err := s.queue.Enqueue(context.Background(), cmd.ID, p); err != nil {
-	// 	return nil, fmt.Errorf("failed to enqueue command: %w", err)
-	// }
-	//
-	// return cmd, nil
-	return nil, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Create a new command in the store
+	cmd, err := s.store.CreateCommand(params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create command: %w", err)
+	}
+
+	// Set priority and status
+	cmd.Priority = p
+	cmd.Status = api.CommandStatusActive
+
+	// Save the updated command
+	if err := s.store.SaveCommand(cmd); err != nil {
+		return nil, fmt.Errorf("failed to save command: %w", err)
+	}
+
+	// Add to queue with priority
+	if err := s.queue.Enqueue(s.ctx, cmd.ID, p); err != nil {
+		return nil, fmt.Errorf("failed to enqueue command: %w", err)
+	}
+
+	return cmd, nil
 }
 
 func (s *scheduler) DequeueCommand(commandID uint) error {
-	// s.mu.Lock()
-	// defer s.mu.Unlock()
-	//
-	// // Load the command
-	// cmd, err := s.store.LoadCommand(commandID)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to load command: %w", err)
-	// }
-	//
-	// // Mark command as inactive
-	// cmd.Status = api.CommandStatusInactive
-	//
-	// // Mark all running tasks as sleeping, ready tasks as blocked
-	// for nv, task := range cmd.Tasks {
-	// 	switch task.Status {
-	// 	case api.TaskStatusRunning:
-	// 		task.Status = api.TaskStatusSleeping
-	// 		cmd.Tasks[nv] = task
-	//
-	// 		// Send TaskInterrupted event
-	// 		event := api.NewTaskEvent(api.TaskInterrupted, *cmd, task)
-	// 		if node, exists := s.nodes[nv]; exists {
-	// 			eventCh, _ := node.CommChan()
-	// 			select {
-	// 			case eventCh <- event:
-	// 			default:
-	// 			}
-	// 		}
-	//
-	// 	case api.TaskStatusReady:
-	// 		task.Status = api.TaskStatusBlocked
-	// 		cmd.Tasks[nv] = task
-	//
-	// 		// Send TaskBlocked event
-	// 		event := api.NewTaskEvent(api.TaskBlocked, *cmd, task)
-	// 		if node, exists := s.nodes[nv]; exists {
-	// 			eventCh, _ := node.CommChan()
-	// 			select {
-	// 			case eventCh <- event:
-	// 			default:
-	// 			}
-	// 		}
-	// 	}
-	// }
-	//
-	// // Save the updated command
-	// if err := s.store.SaveCommand(cmd); err != nil {
-	// 	return fmt.Errorf("failed to save command: %w", err)
-	// }
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Load the command
+	cmd, err := s.store.LoadCommand(commandID)
+	if err != nil {
+		return fmt.Errorf("failed to load command: %w", err)
+	}
+
+	// Check if command is finished
+	if cmd.IsFinished() {
+		return fmt.Errorf("cannot deactivate finished command %d", commandID)
+	}
+
+	// Set status to inactive
+	cmd.Status = api.CommandStatusInactive
+
+	// Save the updated command
+	if err := s.store.SaveCommand(cmd); err != nil {
+		return fmt.Errorf("failed to save command: %w", err)
+	}
+
+	// Remove the commandID from queue.
+	if err := s.queue.Remove(s.ctx, commandID); err != nil {
+		return fmt.Errorf("failed to enqueue command: %w", err)
+	}
 
 	return nil
 }
 
 func (s *scheduler) RequeueCommand(commandID uint) (*api.Command, error) {
-	// s.mu.Lock()
-	// defer s.mu.Unlock()
-	//
-	// // Load the command
-	// cmd, err := s.store.LoadCommand(commandID)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed to load command: %w", err)
-	// }
-	//
-	// // Mark command as active
-	// cmd.Status = api.CommandStatusActive
-	//
-	// // Wake up sleeping tasks, unblock blocked tasks
-	// for nv, task := range cmd.Tasks {
-	// 	switch task.Status {
-	// 	case api.TaskStatusSleeping, api.TaskStatusBlocked:
-	// 		task.Status = api.TaskStatusReady
-	// 		cmd.Tasks[nv] = task
-	//
-	// 		// Send TaskWakeup event
-	// 		event := api.NewTaskEvent(api.TaskWakeup, *cmd, task)
-	// 		if node, exists := s.nodes[nv]; exists {
-	// 			eventCh, _ := node.CommChan()
-	// 			select {
-	// 			case eventCh <- event:
-	// 			default:
-	// 			}
-	// 		}
-	// 	}
-	// }
-	//
-	// // Save the updated command
-	// if err := s.store.SaveCommand(cmd); err != nil {
-	// 	return nil, fmt.Errorf("failed to save command: %w", err)
-	// }
-	//
-	// // Add back to queue with its priority
-	// if err := s.queue.Enqueue(context.Background(), cmd.ID, cmd.Priority); err != nil {
-	// 	return nil, fmt.Errorf("failed to enqueue command: %w", err)
-	// }
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	return nil, nil
+	// Load the command
+	cmd, err := s.store.LoadCommand(commandID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load command: %w", err)
+	}
+
+	// Check if command is finished
+	if cmd.IsFinished() {
+		return nil, fmt.Errorf("cannot requeue finished command %d", commandID)
+	}
+
+	// Set status to active
+	cmd.Status = api.CommandStatusActive
+
+	// Save the updated command
+	if err := s.store.SaveCommand(cmd); err != nil {
+		return nil, fmt.Errorf("failed to save command: %w", err)
+	}
+
+	// Add to queue with its priority
+	if err := s.queue.Enqueue(s.ctx, cmd.ID, cmd.Priority); err != nil {
+		return nil, fmt.Errorf("failed to enqueue command: %w", err)
+	}
+
+	return cmd, nil
 }
 
 func (s *scheduler) Start(ctx context.Context) chan error {
 	schedulerErrChan := make(chan error, 1)
 	//  the execution loop in a goroutine
 	go func() {
+		// Save the context.
+		s.ctx = ctx
+
 		// Load the existing commandIDs first and add them to the queue.
 		defer s.sendCloseSignals(schedulerErrChan)
 
@@ -317,7 +283,7 @@ func (s *scheduler) Start(ctx context.Context) chan error {
 		for {
 			// Dequeue the next command (this blocks if queue is empty)
 			// We need to handle context cancellation while blocked on Dequeue
-			commandID, _, err := s.queue.Dequeue(ctx)
+			commandID, commandPriority, err := s.queue.Dequeue(s.ctx)
 			if err != nil {
 				if err == context.Canceled {
 					return
@@ -337,7 +303,7 @@ func (s *scheduler) Start(ctx context.Context) chan error {
 			s.currentCmd = &commandID
 			s.mu.Unlock()
 
-			task, alreadyRunning, err := s.getNextTask(ctx, command)
+			task, alreadyRunning, err := s.getNextTask(command)
 			if err != nil {
 				logger.Errorf("Cannot find the next task: %s", err)
 				continue
@@ -346,6 +312,7 @@ func (s *scheduler) Start(ctx context.Context) chan error {
 			// No more tasks, command is complete
 			if task == nil {
 				command.MarkAsFinished(true)
+
 				if saveErr := s.store.SaveCommand(command); saveErr != nil {
 					logger.Errorf("Failed to save command: %v", saveErr)
 					return
@@ -357,7 +324,7 @@ func (s *scheduler) Start(ctx context.Context) chan error {
 					eventType = api.OnTaskRestarted
 				}
 
-				if err := s.invokeHandler(ctx, api.Event{
+				if err := s.invokeHandler(api.Event{
 					EventType: eventType,
 					Command:   *command,
 					Task:      *task,
@@ -395,7 +362,7 @@ func (s *scheduler) Start(ctx context.Context) chan error {
 					}
 
 					// Requeue the command to process next task
-					if _, requeueErr := s.RequeueCommand(commandID); requeueErr != nil {
+					if requeueErr := s.queue.Enqueue(s.ctx, commandID, commandPriority); requeueErr != nil {
 						logger.Errorf("Failed to requeue command: %v", requeueErr)
 						return
 					}
@@ -413,7 +380,7 @@ func (s *scheduler) Start(ctx context.Context) chan error {
 }
 
 // getNextTask returns the next available task to execute for the given command.
-func (s *scheduler) getNextTask(ctx context.Context, command *api.Command) (*api.Task, bool, error) {
+func (s *scheduler) getNextTask(command *api.Command) (*api.Task, bool, error) {
 	// Get the reverse depth map (depth -> nodes at that depth)
 	reverseDepthMap := s.additiveDAG.GetReverseDepthMap()
 
@@ -447,7 +414,11 @@ func (s *scheduler) getNextTask(ctx context.Context, command *api.Command) (*api
 				}
 				command.Tasks[nv] = newTask
 
-				if err := s.invokeHandler(ctx, api.Event{}); err != nil {
+				if err := s.invokeHandler(api.Event{
+					EventType: api.OnTaskCreated,
+					Command:   *command,
+					Task:      *newTask,
+				}); err != nil {
 					return nil, false, err
 				}
 				return newTask, false, nil
@@ -474,15 +445,16 @@ func (s *scheduler) getNextTask(ctx context.Context, command *api.Command) (*api
 }
 
 // This would send an event and waits for the response.
-func (s *scheduler) invokeHandler(ctx context.Context, event api.Event) error {
+func (s *scheduler) invokeHandler(event api.Event) error {
+	logger.Debugf("invoke handler is triggered by node: %s", event.Task.NodeNV)
 	eventCh, errCh := s.nodes[event.Task.NodeNV].CommChan()
 
 	select {
-	case <-ctx.Done():
+	case <-s.ctx.Done():
 		return context.Canceled
 	case eventCh <- event:
 		select {
-		case <-ctx.Done():
+		case <-s.ctx.Done():
 			return nil
 		case err := <-errCh:
 			return err
@@ -521,7 +493,6 @@ func (s *scheduler) sendCloseSignals(schedulerErrChan chan error) {
 	// Wait for all goroutines to finish, then send nil
 	go func() {
 		wg.Wait()
-		logger.Info("All shutdown signals sent")
 		schedulerErrChan <- nil
 
 	}()

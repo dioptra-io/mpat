@@ -3,7 +3,6 @@ package api
 import (
 	"database/sql/driver"
 	"encoding/json"
-	"fmt"
 	"time"
 )
 
@@ -49,7 +48,7 @@ type Command struct {
 	Payload string `json:"payload"`
 
 	// All tasks created for this command.
-	Tasks map[NamedVersion]*Task `gorm:"serializer:json" json:"tasks"`
+	Tasks TaskMap `gorm:"type:text" json:"-"` // Don't use default JSON marshaling
 
 	// Creation timestamp.
 	CreatedAt time.Time `json:"created_at"`
@@ -99,7 +98,7 @@ func (Command) TableName() string {
 }
 
 // TaskMap is a custom type for map[NamedVersion]Task that implements sql.Scanner and driver.Valuer
-type TaskMap map[NamedVersion]Task
+type TaskMap map[NamedVersion]*Task
 
 // Value implements the driver.Valuer interface for GORM
 func (tm TaskMap) Value() (driver.Value, error) {
@@ -109,63 +108,44 @@ func (tm TaskMap) Value() (driver.Value, error) {
 	return json.Marshal(tm)
 }
 
-// Scan implements the sql.Scanner interface for GORM
-func (tm *TaskMap) Scan(value any) error {
-	if value == nil {
-		*tm = make(map[NamedVersion]Task)
-		return nil
+// MarshalJSON implements custom JSON marshaling for Command
+func (c Command) MarshalJSON() ([]byte, error) {
+	// Convert Tasks map to slice for JSON
+	tasks := make([]*Task, 0, len(c.Tasks))
+	for _, task := range c.Tasks {
+		tasks = append(tasks, task)
 	}
 
-	var bytes []byte
-	switch v := value.(type) {
-	case []byte:
-		bytes = v
-	case string:
-		bytes = []byte(v)
-	default:
-		return fmt.Errorf("failed to scan TaskMap: unsupported type %T", value)
-	}
-
-	var temp map[NamedVersion]Task
-	if err := json.Unmarshal(bytes, &temp); err != nil {
-		return fmt.Errorf("failed to unmarshal TaskMap: %w", err)
-	}
-
-	*tm = temp
-	return nil
+	type Alias Command
+	return json.Marshal(&struct {
+		Tasks []*Task `json:"tasks"`
+		*Alias
+	}{
+		Tasks: tasks,
+		Alias: (*Alias)(&c),
+	})
 }
 
-// MarshalJSON implements json.Marshaler for TaskMap
-func (tm TaskMap) MarshalJSON() ([]byte, error) {
-	if tm == nil {
-		return []byte("{}"), nil
+// UnmarshalJSON implements custom JSON unmarshaling for Command
+func (c *Command) UnmarshalJSON(data []byte) error {
+	type Alias Command
+	aux := &struct {
+		Tasks []*Task `json:"tasks"`
+		*Alias
+	}{
+		Alias: (*Alias)(c),
 	}
-	// Convert map to use string keys for JSON
-	stringMap := make(map[string]Task)
-	for nv, task := range tm {
-		stringMap[nv.String()] = task
-	}
-	return json.Marshal(stringMap)
-}
 
-// UnmarshalJSON implements json.Unmarshaler for TaskMap
-func (tm *TaskMap) UnmarshalJSON(data []byte) error {
-	// Unmarshal into string-keyed map first
-	var stringMap map[string]Task
-	if err := json.Unmarshal(data, &stringMap); err != nil {
+	if err := json.Unmarshal(data, aux); err != nil {
 		return err
 	}
 
-	// Convert string keys back to NamedVersion
-	*tm = make(map[NamedVersion]Task)
-	for key, task := range stringMap {
-		// Parse the string key back to NamedVersion
-		// Format is "name/vVersion"
-		var nv NamedVersion
-		if err := json.Unmarshal([]byte(`"`+key+`"`), &nv); err != nil {
-			return fmt.Errorf("failed to parse NamedVersion key %s: %w", key, err)
+	// Convert slice back to map
+	c.Tasks = make(TaskMap)
+	for _, task := range aux.Tasks {
+		if task != nil {
+			c.Tasks[task.NodeNV] = task
 		}
-		(*tm)[nv] = task
 	}
 
 	return nil

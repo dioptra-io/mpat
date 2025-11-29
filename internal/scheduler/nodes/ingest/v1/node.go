@@ -22,20 +22,20 @@ func NewIngestNode() scheduler.Node {
 }
 
 func onTaskCreate(command api.Command, task api.Task) error {
-	logger.Infoln("create function is invoked")
+	logger.Debugln("create function is invoked")
 	return nil
 }
 
 func onTaskStarted(command api.Command, task api.Task) error {
-	logger.Infoln("start function is invoked")
+	logger.Debugln("start function is invoked")
 	return nil
 }
 
 func onTaskRestarted(command api.Command, task api.Task) error {
-	logger.Infoln("restart function is invoked")
+	logger.Debugln("restart function is invoked")
 	return nil
 }
 
 func onExit() {
-	logger.Infoln("exit function is invoked")
+	logger.Debugln("exit function is invoked")
 }

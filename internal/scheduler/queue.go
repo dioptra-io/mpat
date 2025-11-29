@@ -9,9 +9,13 @@ import (
 type Queue interface {
 	// Enqueue adds a command ID with the given priority.
 	Enqueue(ctx context.Context, id uint, p uint) error
+
 	// Dequeue removes and returns the command ID with the highest priority. If the queue is empty, it blocks until an
 	// element is available or context is cancelled.
 	Dequeue(ctx context.Context) (uint, uint, error)
+
+	// Remove specific commandID directlry.
+	Remove(ctx context.Context, commandID uint) error
 }
 
 // node represents a single element in the priority queue
@@ -118,4 +122,58 @@ func (lq *linkedQueue) Dequeue(ctx context.Context) (uint, uint, error) {
 	node := lq.head
 	lq.head = lq.head.next
 	return node.id, node.priority, nil
+}
+
+// Remove deletes a specific command ID from the queue.
+// If the command is not found, it returns nil.
+// If the context is cancelled, it returns context.Canceled.
+func (lq *linkedQueue) Remove(ctx context.Context, commandID uint) error {
+	// Check context early
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	lq.mu.Lock()
+	defer lq.mu.Unlock()
+
+	if lq.closed {
+		return context.Canceled
+	}
+
+	// Empty list
+	if lq.head == nil {
+		return nil
+	}
+
+	// If head matches
+	if lq.head.id == commandID {
+		lq.head = lq.head.next
+		return nil
+	}
+
+	// Walk the linked list
+	prev := lq.head
+	curr := lq.head.next
+
+	for curr != nil {
+		// Check context while iterating
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if curr.id == commandID {
+			prev.next = curr.next
+			return nil
+		}
+
+		prev = curr
+		curr = curr.next
+	}
+
+	// Not found — not an error
+	return nil
 }
