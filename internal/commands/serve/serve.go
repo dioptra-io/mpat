@@ -31,28 +31,34 @@ func ServeCmd() *cobra.Command {
 		Short: "Run the server",
 		Long:  "Run the server that takes jobs and executes it.",
 		Run: func(cmd *cobra.Command, args []string) {
-			serveCmdRun(cmd, args, dbPath)
+			serveCmdRun(dbPath)
 		},
 	}
 
-	serveCmd.Flags().StringVar(&dbPath, "db", "mpat.db", "Path to SQLite database")
+	serveCmd.Flags().StringVar(&dbPath, "db", ":memory:", "Path to SQLite database")
 
 	gin.SetMode(gin.ReleaseMode)
 
 	return serveCmd
 }
 
-func serveCmdRun(cmd *cobra.Command, args []string, dbPath string) {
+func serveCmdRun(dbPath string) {
 	logger.Debugln("Starting the server.")
+	var err error
+	var storeObject scheduler.Store
 
 	// Create store
-	store, err := store.NewInMemoryStore()
+	if dbPath == ":memory:" {
+		storeObject, err = store.NewInMemoryStore()
+	} else {
+		storeObject, err = store.NewSQLiteStore(dbPath)
+	}
 	if err != nil {
 		logger.Fatalf("Failed to create store: %v", err)
 	}
 
 	// Add the processing nodes here with the topological order.
-	sched, err := scheduler.NewScheduler(store,
+	sched, err := scheduler.NewScheduler(storeObject,
 		ingestv1.NewIngestNode(),
 	)
 	if err != nil {
