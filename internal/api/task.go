@@ -29,39 +29,29 @@ const (
 
 	// Task finished successfully (command may be active or inactive).
 	TaskStatusCompleted TaskStatus = "completed"
+
+	// Task has no associated node at the moment (this was an out to date task)
+	TaskStatusOrphaned TaskStatus = "orphaned"
 )
 
 // Tasks are spawned for each command and for each node.
 type Task struct {
-	// Status of the process.
-	Status TaskStatus `json:"status"`
+	// Composite primary key: uniquely identifies a task
+	CommandID uint         `gorm:"primaryKey;references:ID;constraint:OnDelete:CASCADE" json:"command_id"`
+	NodeNV    NamedVersion `gorm:"primaryKey;type:text" json:"node_nv"`
 
-	// Params for additional information.
-	Params string `json:"params"`
+	// Status if the task.
+	Status TaskStatus `gorm:"type:varchar(16)" json:"status"`
 
-	// CommandID; all processes belong to a command.
-	CommandID uint `json:"command_id"`
+	// Runtime params of the task.
+	Params string `gorm:"type:text" json:"params"`
 
-	// Name of the node that this process is assigned.
-	NodeNV NamedVersion `json:"node_nv"`
-
-	// Timestamp of creation.
-	CreatedAt time.Time `json:"created_at"`
-
-	// Timestamp of task marked as failed or done status.
-	FinishedAt time.Time `json:"finished_at"`
+	// Timestamps.
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
+	FinishedAt *time.Time `json:"finished_at"`
 }
 
 func (t Task) IsFinished() bool {
-	return t.Status == TaskStatusFailed ||
-		t.Status == TaskStatusCompleted
-}
-
-func (t Task) CanRun() bool {
-	return t.Status == TaskStatusReady ||
-		t.Status == TaskStatusRunning
-}
-
-func (Task) TableName() string {
-	return "tasks"
+	return t.Status == TaskStatusFailed || t.Status == TaskStatusCompleted
 }

@@ -2,12 +2,14 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/dioptra-io/ufuk-research/internal/api"
 	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 )
 
 // SchedulerAPI wraps the scheduler with HTTP API capabilities
@@ -15,21 +17,24 @@ type SchedulerAPI interface {
 	// SetupHandlers configures HTTP routes on the provided router
 	SetupHandlers(router *gin.Engine)
 
-	// Start starts the HTTP server in a goroutine
-	// Returns error channel that signals when HTTP server exits
-	Start(ctx context.Context) chan error
+	// Start starts the HTTP server in the same goroutine. Returns error channel that signals when HTTP server exits
+	Run(ctx context.Context) error
 }
 
 type schedulerAPI struct {
 	scheduler Scheduler
+	logger    logrus.FieldLogger
 	server    *http.Server
 	router    *gin.Engine
 }
 
+var _ SchedulerAPI = (*schedulerAPI)(nil)
+
 // NewSchedulerAPI creates a new SchedulerAPI wrapper around a scheduler
-func NewSchedulerAPI(sched Scheduler) SchedulerAPI {
+func NewSchedulerAPI(sched Scheduler, logger logrus.FieldLogger) SchedulerAPI {
 	return &schedulerAPI{
 		scheduler: sched,
+		logger:    logger,
 	}
 }
 
@@ -74,36 +79,38 @@ func (s *schedulerAPI) SetupHandlers(router *gin.Engine) {
 
 }
 
-// Start starts the HTTP server in a goroutine
-// Returns error channel that signals when HTTP server exits
-func (s *schedulerAPI) Start(ctx context.Context) chan error {
-	errChan := make(chan error, 1)
+// Start starts the HTTP server in the same goroutine. Returns error channel that signals when HTTP server exits
+func (s *schedulerAPI) Run(ctx context.Context) error {
+	s.logger.Info("HTTP server starting on :8080")
+
+	// Run server in a goroutine
+	serverErr := make(chan error, 1)
 
 	go func() {
-		logger.Info("HTTP server starting on :8080")
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Errorf("HTTP server error: %v", err)
-			errChan <- err
+			serverErr <- err
 			return
 		}
-		errChan <- nil
+		serverErr <- nil
 	}()
 
-	// Handle graceful shutdown
-	go func() {
-		<-ctx.Done()
-
+	// Wait for either:
+	// 1. context cancellation → trigger shutdown
+	// 2. server error → return immediately
+	select {
+	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
 		if err := s.server.Shutdown(shutdownCtx); err != nil {
-			logger.Errorf("HTTP server shutdown error: %v", err)
-		} else {
-			logger.Info("Exiting HTTP server")
+			s.logger.Errorf("HTTP server shutdown error: %v", err)
+			return err
 		}
-	}()
+		return nil
 
-	return errChan
+	case err := <-serverErr:
+		return err
+	}
 }
 
 // ============================================================================
@@ -117,14 +124,14 @@ func (s *schedulerAPI) handleHealth(c *gin.Context) {
 }
 
 func (s *schedulerAPI) handleGetStatus(c *gin.Context) {
-	currentID, err := s.scheduler.GetCurrentCommandID()
+	status := gin.H{}
 
-	status := gin.H{
-		"has_running_command": err == nil && currentID != nil,
-	}
-
-	if currentID != nil {
-		status["current_command_id"] = *currentID
+	currentID, err := s.scheduler.CurrentCommandID()
+	if err == ErrNoActiveCommand {
+		status["has_running_command"] = false
+	} else {
+		status["current_command_id"] = currentID
+		status["has_running_command"] = true
 	}
 
 	c.JSON(http.StatusOK, status)
@@ -145,7 +152,10 @@ func (s *schedulerAPI) handleEnqueueCommand(c *gin.Context) {
 		return
 	}
 
-	command, err := s.scheduler.EnqueueCommand(req.Payload, req.Priority)
+	command, err := s.scheduler.EnqueueCommand(&api.Command{
+		Priority: req.Priority,
+		Payload:  req.Payload,
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -161,7 +171,7 @@ func (s *schedulerAPI) handleGetCommand(c *gin.Context) {
 		return
 	}
 
-	command, err := s.scheduler.GetCommand(id)
+	command, err := s.scheduler.Store().LoadCommand(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -171,26 +181,39 @@ func (s *schedulerAPI) handleGetCommand(c *gin.Context) {
 }
 
 func (s *schedulerAPI) handleGetCurrentCommand(c *gin.Context) {
-	commandID, err := s.scheduler.GetCurrentCommandID()
-	if err != nil || commandID == nil {
+	commandID, err := s.scheduler.CurrentCommandID()
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "no command is currently running"})
 		return
 	}
 
-	command, err := s.scheduler.GetCommand(*commandID)
+	cmd, err := s.scheduler.Store().LoadCommand(commandID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
+	if cmd == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "command not found"})
+		return
+	}
 
-	c.JSON(http.StatusOK, command)
+	c.JSON(http.StatusOK, cmd)
 }
 
 func (s *schedulerAPI) handleListCommands(c *gin.Context) {
-	commands, err := s.scheduler.ListCommands()
+	ids, err := s.scheduler.Store().ListAllCommandIDs()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	commands := make([]*api.Command, 0, len(ids))
+	for _, id := range ids {
+		cmd, err := s.scheduler.Store().LoadCommand(id)
+		if err != nil || cmd == nil {
+			continue
+		}
+		commands = append(commands, cmd)
 	}
 
 	c.JSON(http.StatusOK, commands)
@@ -203,7 +226,17 @@ func (s *schedulerAPI) handleDequeueCommand(c *gin.Context) {
 		return
 	}
 
-	if err := s.scheduler.DequeueCommand(id); err != nil {
+	if err := s.scheduler.PauseCommand(id); err != nil {
+		// More informative error responses if you like:
+		switch {
+		case errors.Is(err, ErrCommandNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "command not found"})
+			return
+		case errors.Is(err, ErrCommandFinished):
+			c.JSON(http.StatusConflict, gin.H{"error": "command is finished"})
+			return
+		}
+
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -243,12 +276,31 @@ func (s *schedulerAPI) handleSetPriority(c *gin.Context) {
 		return
 	}
 
-	if err := s.scheduler.SetPriority(id, req.Priority); err != nil {
+	// Load command
+	cmd, err := s.scheduler.Store().LoadCommand(id)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	if cmd == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "command not found"})
+		return
+	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "priority updated successfully"})
+	// Update priority
+	cmd.Priority = req.Priority
+
+	if err := s.scheduler.Store().UpdateCommand(cmd); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to update command priority",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "priority updated",
+		"command": cmd,
+	})
 }
 
 // ============================================================================
@@ -256,21 +308,35 @@ func (s *schedulerAPI) handleSetPriority(c *gin.Context) {
 // ============================================================================
 
 func (s *schedulerAPI) handleListAllTasks(c *gin.Context) {
-	commands, err := s.scheduler.ListCommands()
+	// 1. List all command IDs
+	ids, err := s.scheduler.Store().ListAllCommandIDs()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Collect all tasks from all commands
 	allTasks := make([]*api.Task, 0)
-	for _, cmd := range commands {
+
+	// 2. Load each command and collect tasks
+	for _, id := range ids {
+		cmd, err := s.scheduler.Store().LoadCommand(id)
+		if err != nil {
+			// If a command was deleted in between, skip silently
+			continue
+		}
+		if cmd == nil {
+			continue
+		}
+
+		// Load each task
 		for _, task := range cmd.Tasks {
-			taskCopy := *task
+			// Copy task to avoid exposing internal pointers
+			taskCopy := task
 			allTasks = append(allTasks, &taskCopy)
 		}
 	}
 
+	// 3. Return all tasks
 	c.JSON(http.StatusOK, allTasks)
 }
 
@@ -281,10 +347,20 @@ func (s *schedulerAPI) handleListCommandTasks(c *gin.Context) {
 		return
 	}
 
-	tasks, err := s.scheduler.ListTasksForCommand(id)
+	cmd, err := s.scheduler.Store().LoadCommand(id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	if cmd == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "command not found"})
+		return
+	}
+
+	tasks := make([]*api.Task, 0, len(cmd.Tasks))
+	for _, t := range cmd.Tasks {
+		tCopy := t
+		tasks = append(tasks, &tCopy)
 	}
 
 	c.JSON(http.StatusOK, tasks)

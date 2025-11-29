@@ -8,15 +8,17 @@ import (
 // Queue represents a thread-safe command queue storing command IDs.
 type Queue interface {
 	// Enqueue adds a command ID with the given priority.
-	Enqueue(ctx context.Context, id uint, p uint) error
+	Enqueue(id uint, p uint) error
 
 	// Dequeue removes and returns the command ID with the highest priority. If the queue is empty, it blocks until an
 	// element is available or context is cancelled.
 	Dequeue(ctx context.Context) (uint, uint, error)
 
 	// Remove specific commandID directlry.
-	Remove(ctx context.Context, commandID uint) error
+	Remove(commandID uint) error
 }
+
+var _ Queue = (*linkedQueue)(nil)
 
 // node represents a single element in the priority queue
 type node struct {
@@ -35,21 +37,14 @@ type linkedQueue struct {
 }
 
 // NewLinkedQueue creates a new LinkedQueue
-func NewLinkedQueue() *linkedQueue {
+func NewLinkedQueue() Queue {
 	lq := &linkedQueue{}
 	lq.cond = sync.NewCond(&lq.mu)
 	return lq
 }
 
 // Enqueue adds a command ID with the given priority. Elements are inserted in sorted order (highest priority first).
-func (lq *linkedQueue) Enqueue(ctx context.Context, id uint, p uint) error {
-	// Check context before acquiring lock
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-
+func (lq *linkedQueue) Enqueue(id uint, p uint) error {
 	lq.mu.Lock()
 	defer lq.mu.Unlock()
 
@@ -127,14 +122,7 @@ func (lq *linkedQueue) Dequeue(ctx context.Context) (uint, uint, error) {
 // Remove deletes a specific command ID from the queue.
 // If the command is not found, it returns nil.
 // If the context is cancelled, it returns context.Canceled.
-func (lq *linkedQueue) Remove(ctx context.Context, commandID uint) error {
-	// Check context early
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-
+func (lq *linkedQueue) Remove(commandID uint) error {
 	lq.mu.Lock()
 	defer lq.mu.Unlock()
 
@@ -158,13 +146,6 @@ func (lq *linkedQueue) Remove(ctx context.Context, commandID uint) error {
 	curr := lq.head.next
 
 	for curr != nil {
-		// Check context while iterating
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
 		if curr.id == commandID {
 			prev.next = curr.next
 			return nil

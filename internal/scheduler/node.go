@@ -24,7 +24,7 @@ type templateNode struct {
 	errChan   chan error
 }
 
-type EventHandleFn func(command api.Command, task api.Task) error
+type EventHandleFn func(command *api.Command, task *api.Task) error
 
 type ExitHandler func()
 

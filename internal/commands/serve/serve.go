@@ -2,13 +2,13 @@ package serve
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/dioptra-io/ufuk-research/internal/log"
 	"github.com/dioptra-io/ufuk-research/internal/mpat"
 	"github.com/dioptra-io/ufuk-research/internal/scheduler"
 	ingestv1 "github.com/dioptra-io/ufuk-research/internal/scheduler/nodes/ingest/v1"
-	"github.com/dioptra-io/ufuk-research/internal/scheduler/store"
 	"github.com/dioptra-io/ufuk-research/internal/signal"
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
@@ -48,73 +48,69 @@ func serveCmdRun(dbPath string) {
 	var storeObject scheduler.Store
 
 	// Create store
-	if dbPath == ":memory:" {
-		storeObject, err = store.NewInMemoryStore()
-	} else {
-		storeObject, err = store.NewSQLiteStore(dbPath)
-	}
+	storeObject, err = scheduler.NewSQLiteStore(dbPath)
+
 	if err != nil {
 		logger.Fatalf("Failed to create store: %v", err)
 	}
 
 	// Add the processing nodes here with the topological order.
-	sched, err := scheduler.NewScheduler(storeObject,
+	sched, err := scheduler.NewScheduler(storeObject, logger,
 		ingestv1.NewIngestNode(),
 	)
 	if err != nil {
 		logger.Fatalf("Failed to create scheduler: %v", err)
 	}
 
-	// Create context for scheduler execution loop
-	schedulerCtx, schedulerCancelFn := context.WithCancel(context.Background())
-	defer schedulerCancelFn() // Ensure cleanup
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// Add the processing nodes here with the topological order.
-	schedAPI := scheduler.NewSchedulerAPI(sched)
+	schedAPI := scheduler.NewSchedulerAPI(sched, logger)
 	schedAPI.SetupHandlers(gin.Default())
 
-	// Start scheduler execution loop
-	schedulerErrChan := sched.Start(schedulerCtx)
-	schedAPIErrChan := schedAPI.Start(schedulerCtx)
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// --- 1. Run Scheduler ---
+	go func() {
+		defer wg.Done()
+		if err := sched.Run(ctx); err != nil && err != context.Canceled {
+			logger.Errorf("Scheduler exited with error: %v", err)
+		} else {
+			logger.Infoln("Scheduler stopped cleanly")
+		}
+	}()
+
+	// --- 2. Run HTTP Server ---
+	go func() {
+		defer wg.Done()
+		if err := schedAPI.Run(ctx); err != nil {
+			logger.Errorf("HTTP API exited with error: %v", err)
+		} else {
+			logger.Infoln("HTTP API stopped cleanly")
+		}
+	}()
 
 	// Wait for shutdown signal
 	logger.Infoln("Scheduler running. Press Ctrl+C to shutdown")
 	<-signal.SetupSignalHandler()
-
-	logger.Infoln("Shutdown signal received, shutting down all services")
+	logger.Infoln("Shutdown signal received")
 
 	// Cancel scheduler context
-	schedulerCancelFn()
+	cancel()
 
-	// Wait for scheduler to finish gracefully
-	waitForServices(schedulerErrChan, schedAPIErrChan, 10*time.Second)
-}
-
-func waitForServices(schedulerChan, apiChan chan error, timeout time.Duration) {
-	done := make(chan struct{})
-
+	// Wait for both goroutines to exit
+	doneChan := make(chan struct{})
 	go func() {
-		// Wait for scheduler
-		if err := <-schedulerChan; err != nil {
-			logger.Errorf("Scheduler exited with error: %v", err)
-		} else {
-			logger.Info("Exitting scheduler.")
-		}
-
-		// Wait for API server
-		if err := <-apiChan; err != nil {
-			logger.Errorf("Exiting HTTP server with error: %v", err)
-		}
-
-		close(done)
+		wg.Wait()
+		close(doneChan)
 	}()
 
 	select {
-	case <-done:
-		logger.Info("Exiting main go routine")
-	case <-time.After(timeout):
-		logger.Warn("Exiting main go routine timeout, shutting down")
+	case <-doneChan:
+		logger.Infoln("All services stopped")
+	case <-time.After(10 * time.Second):
+		logger.Warn("Timeout waiting for services to stop")
 	}
-
-	time.Sleep(10 * time.Millisecond)
 }

@@ -32,6 +32,9 @@ type AdditiveDAG interface {
 	// Nodes at each depth level are ordered by their insertion order.
 	// Returns a copy of the internal map to prevent external modifications.
 	GetReverseDepthMap() map[uint][]api.NamedVersion
+
+	// Returns all of the nodes as a list.
+	GetNodes() []Node
 }
 
 // NewAdditiveDAG creates and returns a new AdditiveDAG instance.
@@ -66,6 +69,8 @@ type dag struct {
 	// Recomputed after each AddNode operation
 	reverseDepthMap map[uint][]api.NamedVersion
 }
+
+var _ AdditiveDAG = (*dag)(nil)
 
 // newDAG creates a new dag instance with initialized maps
 func newDAG() *dag {
@@ -196,4 +201,15 @@ func (d *dag) computeDepths() {
 		depth := d.depthMap[nodeID]
 		d.reverseDepthMap[depth] = append(d.reverseDepthMap[depth], nodeID)
 	}
+}
+
+// GetNodes returns all nodes in insertion order.
+func (d *dag) GetNodes() []Node {
+	out := make([]Node, 0, len(d.insertionOrder))
+	for _, nv := range d.insertionOrder {
+		if n, ok := d.nodes[nv]; ok {
+			out = append(out, n)
+		}
+	}
+	return out
 }

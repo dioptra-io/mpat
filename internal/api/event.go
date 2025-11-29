@@ -17,6 +17,6 @@ func (e HandlerType) String() string {
 // Event represents a task event (includes both command and task)
 type Event struct {
 	EventType HandlerType
-	Command   Command
-	Task      Task
+	Command   *Command
+	Task      *Task
 }
