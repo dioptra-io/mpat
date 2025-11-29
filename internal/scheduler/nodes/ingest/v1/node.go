@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"errors"
 	"time"
 
 	"github.com/dioptra-io/ufuk-research/internal/api"
@@ -32,7 +33,7 @@ func onTaskStarted(command *api.Command, task *api.Task) error {
 	logger.Debugln("start function is invoked")
 
 	time.Sleep(10 * time.Second)
-	return nil
+	return errors.New("this is an error")
 }
 
 func onTaskRestarted(command *api.Command, task *api.Task) error {
