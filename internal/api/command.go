@@ -1,6 +1,11 @@
 package api
 
-import "time"
+import (
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
 // Command states
 //
@@ -40,11 +45,11 @@ type Command struct {
 	// Priority of the command, higher the better.
 	Priority uint `json:"priority"`
 
-	// Params for additional information.
-	Params string `json:"params"`
+	// Payload for additional information.
+	Payload string `json:"payload"`
 
 	// All tasks created for this command.
-	TaskIDs []uint `gorm:"serializer:json" json:"task_ids"`
+	Tasks map[NamedVersion]*Task `gorm:"serializer:json" json:"tasks"`
 
 	// Creation timestamp.
 	CreatedAt time.Time `json:"created_at"`
@@ -62,6 +67,106 @@ func (c Command) IsFinished() bool {
 		c.Status == CommandStatusCompleted
 }
 
+// Finish sets the command and all tasks state to "failed" or "completed"
+func (c *Command) MarkAsFinished(success bool) {
+	c.FinishedAt = time.Now()
+
+	if success {
+		c.Status = CommandStatusCompleted
+		// Mark all non-terminal tasks as completed
+		for nv, task := range c.Tasks {
+			if task.Status != TaskStatusCompleted && task.Status != TaskStatusFailed {
+				task.Status = TaskStatusCompleted
+				task.FinishedAt = time.Now()
+				c.Tasks[nv] = task
+			}
+		}
+	} else {
+		c.Status = CommandStatusFailed
+		// Mark all non-terminal tasks as failed
+		for nv, task := range c.Tasks {
+			if task.Status != TaskStatusCompleted && task.Status != TaskStatusFailed {
+				task.Status = TaskStatusFailed
+				task.FinishedAt = time.Now()
+				c.Tasks[nv] = task
+			}
+		}
+	}
+}
+
 func (Command) TableName() string {
 	return "commands"
+}
+
+// TaskMap is a custom type for map[NamedVersion]Task that implements sql.Scanner and driver.Valuer
+type TaskMap map[NamedVersion]Task
+
+// Value implements the driver.Valuer interface for GORM
+func (tm TaskMap) Value() (driver.Value, error) {
+	if tm == nil {
+		return "{}", nil
+	}
+	return json.Marshal(tm)
+}
+
+// Scan implements the sql.Scanner interface for GORM
+func (tm *TaskMap) Scan(value any) error {
+	if value == nil {
+		*tm = make(map[NamedVersion]Task)
+		return nil
+	}
+
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return fmt.Errorf("failed to scan TaskMap: unsupported type %T", value)
+	}
+
+	var temp map[NamedVersion]Task
+	if err := json.Unmarshal(bytes, &temp); err != nil {
+		return fmt.Errorf("failed to unmarshal TaskMap: %w", err)
+	}
+
+	*tm = temp
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler for TaskMap
+func (tm TaskMap) MarshalJSON() ([]byte, error) {
+	if tm == nil {
+		return []byte("{}"), nil
+	}
+	// Convert map to use string keys for JSON
+	stringMap := make(map[string]Task)
+	for nv, task := range tm {
+		stringMap[nv.String()] = task
+	}
+	return json.Marshal(stringMap)
+}
+
+// UnmarshalJSON implements json.Unmarshaler for TaskMap
+func (tm *TaskMap) UnmarshalJSON(data []byte) error {
+	// Unmarshal into string-keyed map first
+	var stringMap map[string]Task
+	if err := json.Unmarshal(data, &stringMap); err != nil {
+		return err
+	}
+
+	// Convert string keys back to NamedVersion
+	*tm = make(map[NamedVersion]Task)
+	for key, task := range stringMap {
+		// Parse the string key back to NamedVersion
+		// Format is "name/vVersion"
+		var nv NamedVersion
+		if err := json.Unmarshal([]byte(`"`+key+`"`), &nv); err != nil {
+			return fmt.Errorf("failed to parse NamedVersion key %s: %w", key, err)
+		}
+		(*tm)[nv] = task
+	}
+
+	return nil
 }

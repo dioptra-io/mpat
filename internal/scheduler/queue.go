@@ -1,15 +1,17 @@
 package scheduler
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 // Queue represents a thread-safe command queue storing command IDs.
 type Queue interface {
 	// Enqueue adds a command ID with the given priority.
-	Enqueue(id uint, p uint) error
-
+	Enqueue(ctx context.Context, id uint, p uint) error
 	// Dequeue removes and returns the command ID with the highest priority. If the queue is empty, it blocks until an
-	// element is available.
-	Dequeue() (uint, uint)
+	// element is available or context is cancelled.
+	Dequeue(ctx context.Context) (uint, uint, error)
 }
 
 // node represents a single element in the priority queue
@@ -22,9 +24,10 @@ type node struct {
 // linkedQueue is a thread-safe priority queue implemented as a sorted linked list. Higher priority values are dequeued
 // first.
 type linkedQueue struct {
-	head *node
-	mu   sync.Mutex
-	cond *sync.Cond
+	head   *node
+	mu     sync.Mutex
+	cond   *sync.Cond
+	closed bool
 }
 
 // NewLinkedQueue creates a new LinkedQueue
@@ -35,9 +38,20 @@ func NewLinkedQueue() *linkedQueue {
 }
 
 // Enqueue adds a command ID with the given priority. Elements are inserted in sorted order (highest priority first).
-func (lq *linkedQueue) Enqueue(id uint, p uint) error {
+func (lq *linkedQueue) Enqueue(ctx context.Context, id uint, p uint) error {
+	// Check context before acquiring lock
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	lq.mu.Lock()
 	defer lq.mu.Unlock()
+
+	if lq.closed {
+		return context.Canceled
+	}
 
 	newNode := &node{
 		id:       id,
@@ -65,18 +79,43 @@ func (lq *linkedQueue) Enqueue(id uint, p uint) error {
 }
 
 // Dequeue removes and returns the command ID with the highest priority. If the queue is empty, it blocks until an
-// element is available.
-func (lq *linkedQueue) Dequeue() (uint, uint) {
+// element is available or context is cancelled. Returns (0, 0) if context is cancelled.
+func (lq *linkedQueue) Dequeue(ctx context.Context) (uint, uint, error) {
 	lq.mu.Lock()
 	defer lq.mu.Unlock()
 
-	// Wait while queue is empty
-	for lq.head == nil {
+	// Wait while queue is empty and context is not cancelled
+	for lq.head == nil && !lq.closed {
+		// Start a goroutine to watch for context cancellation
+		done := make(chan struct{})
+		go func() {
+			select {
+			case <-ctx.Done():
+				lq.mu.Lock()
+				lq.closed = true
+				lq.cond.Broadcast() // Wake up all waiting goroutines
+				lq.mu.Unlock()
+			case <-done:
+				return
+			}
+		}()
+
 		lq.cond.Wait()
+		close(done) // Stop the context watcher
+
+		// Check if we were woken up due to context cancellation
+		if lq.closed && lq.head == nil {
+			return 0, 0, ctx.Err()
+		}
+	}
+
+	// If closed and no items, return context error
+	if lq.head == nil {
+		return 0, 0, ctx.Err()
 	}
 
 	// Remove and return the head (highest priority)
 	node := lq.head
 	lq.head = lq.head.next
-	return node.id, node.priority
+	return node.id, node.priority, nil
 }

@@ -24,24 +24,15 @@ const (
 	// Command is active; task is currently running.
 	TaskStatusRunning TaskStatus = "running"
 
-	// Command is inactive; task is paused.
-	TaskStatusSleeping TaskStatus = "sleeping"
-
 	// Command is active; task finished with an error.
 	TaskStatusFailed TaskStatus = "failed"
 
 	// Task finished successfully (command may be active or inactive).
 	TaskStatusCompleted TaskStatus = "completed"
-
-	// The Node responsible for this task no longer exists.
-	TaskStatusOrphaned TaskStatus = "orphaned"
 )
 
 // Tasks are spawned for each command and for each node.
 type Task struct {
-	// ID of the process.
-	ID uint `gorm:"primaryKey" json:"id"`
-
 	// Status of the process.
 	Status TaskStatus `json:"status"`
 
@@ -63,14 +54,12 @@ type Task struct {
 
 func (t Task) IsFinished() bool {
 	return t.Status == TaskStatusFailed ||
-		t.Status == TaskStatusCompleted ||
-		t.Status == TaskStatusOrphaned
+		t.Status == TaskStatusCompleted
 }
 
 func (t Task) CanRun() bool {
 	return t.Status == TaskStatusReady ||
-		t.Status == TaskStatusRunning ||
-		t.Status == TaskStatusSleeping
+		t.Status == TaskStatusRunning
 }
 
 func (Task) TableName() string {

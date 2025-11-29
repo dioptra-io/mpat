@@ -1,8 +1,6 @@
 package ingest
 
 import (
-	"context"
-
 	"github.com/dioptra-io/ufuk-research/internal/api"
 	"github.com/dioptra-io/ufuk-research/internal/log"
 	"github.com/dioptra-io/ufuk-research/internal/scheduler"
@@ -10,23 +8,34 @@ import (
 
 var logger = log.GetLogger()
 
-// This is a IngestNode that can be used for testing.
-type IngestNode struct {
-	// etc.
-}
-
 func NewIngestNode() scheduler.Node {
-	return &IngestNode{}
+	return scheduler.SpawnNode(&scheduler.NodeConfig{
+		Name:            "ingest_node",
+		Version:         1,
+		Dependencies:    []api.NamedVersion{},
+		ChanLength:      10,
+		OnTaskCreated:   onTaskCreate,
+		OnTaskStarted:   onTaskStarted,
+		OnTaskRestarted: onTaskRestarted,
+		OnExit:          onExit,
+	})
 }
 
-func (n *IngestNode) NamedVersion() api.NamedVersion {
-	return api.NewNV("ingest_node", 1) // Hardcoded name and version
-}
-
-func (n *IngestNode) OnEvent(ctx context.Context, c *api.Command, t *api.Task, event api.Event) error {
-	switch event {
-	case api.CommandCreated:
-		logger.Infof("Command created: %v\n", c.Params)
-	}
+func onTaskCreate(command api.Command, task api.Task) error {
+	logger.Infoln("create function is invoked")
 	return nil
+}
+
+func onTaskStarted(command api.Command, task api.Task) error {
+	logger.Infoln("start function is invoked")
+	return nil
+}
+
+func onTaskRestarted(command api.Command, task api.Task) error {
+	logger.Infoln("restart function is invoked")
+	return nil
+}
+
+func onExit() {
+	logger.Infoln("exit function is invoked")
 }

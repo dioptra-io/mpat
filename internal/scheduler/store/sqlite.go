@@ -22,7 +22,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	}
 
 	// Auto-migrate the schema
-	if err := db.AutoMigrate(&api.Command{}, &api.Task{}); err != nil {
+	if err := db.AutoMigrate(&api.Command{}); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
@@ -38,10 +38,11 @@ func (s *SQLiteStore) Close() error {
 	return sqlDB.Close()
 }
 
-// CreateEmptyCommand creates and persists a new empty command.
-func (s *SQLiteStore) CreateEmptyCommand() (*api.Command, error) {
+// CreateCommand creates a new command with the given payload, it also creates the Tasks.
+func (s *SQLiteStore) CreateCommand(payload string) (*api.Command, error) {
 	cmd := &api.Command{
-		TaskIDs:   []uint{},
+		Payload:   payload,
+		Tasks:     make(map[api.NamedVersion]*api.Task),
 		CreatedAt: time.Now(),
 	}
 
@@ -52,80 +53,39 @@ func (s *SQLiteStore) CreateEmptyCommand() (*api.Command, error) {
 	return cmd, nil
 }
 
-// CreateEmptyTask creates and persists a new empty task.
-func (s *SQLiteStore) CreateEmptyTask() (*api.Task, error) {
-	task := &api.Task{
-		CreatedAt: time.Now(),
+// LoadCommand loads the command with the commandID also populates the Task fields.
+func (s *SQLiteStore) LoadCommand(commandID uint) (*api.Command, error) {
+	var cmd api.Command
+	result := s.db.First(&cmd, commandID)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("command with ID %d does not exist", commandID)
+		}
+		return nil, fmt.Errorf("failed to load command: %w", result.Error)
 	}
 
-	if err := s.db.Create(task).Error; err != nil {
-		return nil, fmt.Errorf("failed to create task: %w", err)
-	}
-
-	return task, nil
+	return &cmd, nil
 }
 
-// UpdateCommand updates an existing command. Returns an error if it does not exist.
-func (s *SQLiteStore) UpdateCommand(c *api.Command) error {
-	result := s.db.Model(&api.Command{}).Where("id = ?", c.ID).Updates(c)
+// SaveCommand saves the command and its tasks.
+func (s *SQLiteStore) SaveCommand(c *api.Command) error {
+	result := s.db.Save(c)
 	if result.Error != nil {
-		return fmt.Errorf("failed to update command: %w", result.Error)
+		return fmt.Errorf("failed to save command: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("command with ID %d does not exist", c.ID)
 	}
+
 	return nil
 }
 
-// UpdateTask updates an existing task. Returns an error if it does not exist.
-func (s *SQLiteStore) UpdateTask(t *api.Task) error {
-	result := s.db.Model(&api.Task{}).Where("id = ?", t.ID).Updates(t)
-	if result.Error != nil {
-		return fmt.Errorf("failed to update task: %w", result.Error)
+// GetAllCommandIDs gets all the commandIDs of the commands.
+func (s *SQLiteStore) GetAllCommandIDs() ([]uint, error) {
+	var ids []uint
+	if err := s.db.Model(&api.Command{}).Pluck("id", &ids).Error; err != nil {
+		return nil, fmt.Errorf("failed to get command IDs: %w", err)
 	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("task with ID %d does not exist", t.ID)
-	}
-	return nil
-}
 
-// LoadCommands returns all persisted commands.
-func (s *SQLiteStore) LoadCommands() ([]*api.Command, error) {
-	var commands []*api.Command
-	if err := s.db.Find(&commands).Error; err != nil {
-		return nil, fmt.Errorf("failed to load commands: %w", err)
-	}
-	return commands, nil
-}
-
-// LoadTasks returns all persisted tasks.
-func (s *SQLiteStore) LoadTasks() ([]*api.Task, error) {
-	var tasks []*api.Task
-	if err := s.db.Find(&tasks).Error; err != nil {
-		return nil, fmt.Errorf("failed to load tasks: %w", err)
-	}
-	return tasks, nil
-}
-
-// FindTasksByCommandID returns all tasks belonging to the given command.
-func (s *SQLiteStore) FindTasksByCommandID(commandID uint) ([]*api.Task, error) {
-	var tasks []*api.Task
-	if err := s.db.Where("command_id = ?", commandID).Find(&tasks).Error; err != nil {
-		return nil, fmt.Errorf("failed to find tasks by command ID: %w", err)
-	}
-	return tasks, nil
-}
-
-// NumCommands returns the total number of persisted commands.
-func (s *SQLiteStore) NumCommands() uint {
-	var count int64
-	s.db.Model(&api.Command{}).Count(&count)
-	return uint(count)
-}
-
-// NumTasks returns the total number of persisted tasks.
-func (s *SQLiteStore) NumTasks() uint {
-	var count int64
-	s.db.Model(&api.Task{}).Count(&count)
-	return uint(count)
+	return ids, nil
 }
