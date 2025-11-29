@@ -40,12 +40,10 @@ type Command struct {
 	Priority uint          `json:"priority"`
 	Payload  string        `gorm:"type:text" json:"payload"`
 
-	// Timestamps.
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 	FinishedAt *time.Time `json:"finished_at"`
 
-	// Tasks associated with this command.
 	Tasks []Task `gorm:"foreignKey:CommandID;constraint:OnDelete:CASCADE" json:"tasks,omitempty"`
 }
 

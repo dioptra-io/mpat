@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/dioptra-io/ufuk-research/internal/log"
-	"github.com/dioptra-io/ufuk-research/internal/mpat"
 	"github.com/dioptra-io/ufuk-research/internal/scheduler"
 	ingestv1 "github.com/dioptra-io/ufuk-research/internal/scheduler/nodes/ingest/v1"
 	"github.com/dioptra-io/ufuk-research/internal/signal"
@@ -15,13 +14,6 @@ import (
 )
 
 var logger = log.GetLogger()
-
-// ServerContext holds the MPAT instance and other server dependencies
-type ServerContext struct {
-	mpat       mpat.MPAT
-	mpatCtx    context.Context
-	mpatCancel context.CancelFunc
-}
 
 func ServeCmd() *cobra.Command {
 	var dbPath string

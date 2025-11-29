@@ -1,6 +1,8 @@
 package ingest
 
 import (
+	"time"
+
 	"github.com/dioptra-io/ufuk-research/internal/api"
 	"github.com/dioptra-io/ufuk-research/internal/log"
 	"github.com/dioptra-io/ufuk-research/internal/scheduler"
@@ -28,6 +30,8 @@ func onTaskCreate(command *api.Command, task *api.Task) error {
 
 func onTaskStarted(command *api.Command, task *api.Task) error {
 	logger.Debugln("start function is invoked")
+
+	time.Sleep(10 * time.Second)
 	return nil
 }
 

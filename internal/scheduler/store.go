@@ -6,6 +6,7 @@ import (
 	"github.com/dioptra-io/ufuk-research/internal/api"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // Store provides access to persistent Commands and Tasks.
@@ -43,7 +44,9 @@ type sqliteStore struct {
 var _ Store = (*sqliteStore)(nil)
 
 func NewSQLiteStore(path string) (Store, error) {
-	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
 	if err != nil {
 		return nil, err
 	}

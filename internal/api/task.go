@@ -40,7 +40,7 @@ type Task struct {
 	CommandID uint         `gorm:"primaryKey;references:ID;constraint:OnDelete:CASCADE" json:"command_id"`
 	NodeNV    NamedVersion `gorm:"primaryKey;type:text" json:"node_nv"`
 
-	// Status if the task.
+	// Status of the task.
 	Status TaskStatus `gorm:"type:varchar(16)" json:"status"`
 
 	// Runtime params of the task.
