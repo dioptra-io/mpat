@@ -26,6 +26,7 @@ func NewIngestNode() scheduler.Node {
 
 func onTaskCreate(command *api.Command, task *api.Task) error {
 	logger.Debugln("create function is invoked")
+
 	return nil
 }
 

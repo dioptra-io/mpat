@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/dioptra-io/ufuk-research/internal/commands/command"
+	"github.com/dioptra-io/ufuk-research/internal/commands/iris"
 	"github.com/dioptra-io/ufuk-research/internal/commands/serve"
 	"github.com/dioptra-io/ufuk-research/internal/log"
 	"github.com/sirupsen/logrus"
@@ -79,6 +80,7 @@ func main() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(serve.ServeCmd())
 	rootCmd.AddCommand(command.CommandCmd())
+	rootCmd.AddCommand(iris.IrisCmd())
 
 	// Add the silent and debug flag
 	rootCmd.PersistentFlags().Bool("debug", false, "see debug messages")
