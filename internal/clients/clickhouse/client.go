@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/csv"
 	"fmt"
 	"io"
+	"strings"
 
 	_ "github.com/ClickHouse/clickhouse-go/v2" // Import ClickHouse driver
 )
@@ -37,6 +39,7 @@ type clickHouseClient struct {
 
 var _ ClickHouseClient = (*clickHouseClient)(nil)
 
+// NewClickHouseClient creates a new ClickHouse client with individual connection parameters
 func NewClickHouseClient(host string, port int, database, username, password string) (ClickHouseClient, error) {
 	// Build connection string
 	dsn := fmt.Sprintf("clickhouse://%s:%s@%s:%d/%s",
@@ -45,6 +48,20 @@ func NewClickHouseClient(host string, port int, database, username, password str
 		host,
 		port,
 		database)
+
+	return NewClickHouseClientFromDSN(dsn)
+}
+
+// NewClickHouseClientFromDSN creates a new ClickHouse client from a DSN string
+// DSN format: clickhouse://username:password@host:port/database
+func NewClickHouseClientFromDSN(dsn string) (ClickHouseClient, error) {
+	if !strings.Contains(dsn, "default_format=") {
+		separator := "?"
+		if strings.Contains(dsn, "?") {
+			separator = "&"
+		}
+		dsn = dsn + separator + "default_format=CSVWithNames"
+	}
 
 	// Open connection
 	db, err := sql.Open("clickhouse", dsn)
@@ -122,14 +139,16 @@ func (c *clickHouseClient) QueryStream(ctx context.Context, query string) (io.Re
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
-
 	// Create a pipe to stream data
 	pr, pw := io.Pipe()
-
 	// Start a goroutine to write query results to the pipe
 	go func() {
 		defer rows.Close()
 		defer pw.Close()
+
+		// Create CSV writer
+		csvWriter := csv.NewWriter(pw)
+		csvWriter.UseCRLF = false // Use \n instead of \r\n
 
 		// Get column names
 		columns, err := rows.Columns()
@@ -138,6 +157,13 @@ func (c *clickHouseClient) QueryStream(ctx context.Context, query string) (io.Re
 			return
 		}
 
+		// Write header row
+		if err := csvWriter.Write(columns); err != nil {
+			pw.CloseWithError(fmt.Errorf("failed to write header: %w", err))
+			return
+		}
+		csvWriter.Flush()
+
 		// Prepare value containers
 		values := make([]interface{}, len(columns))
 		valuePtrs := make([]interface{}, len(columns))
@@ -145,29 +171,24 @@ func (c *clickHouseClient) QueryStream(ctx context.Context, query string) (io.Re
 			valuePtrs[i] = &values[i]
 		}
 
-		// Write header
-		for i, col := range columns {
-			if i > 0 {
-				fmt.Fprint(pw, "\t")
-			}
-			fmt.Fprint(pw, col)
-		}
-		fmt.Fprintln(pw)
-
-		// Write rows
+		// Write data rows
 		for rows.Next() {
 			if err := rows.Scan(valuePtrs...); err != nil {
 				pw.CloseWithError(fmt.Errorf("failed to scan row: %w", err))
 				return
 			}
 
+			// Convert values to strings for CSV
+			record := make([]string, len(values))
 			for i, val := range values {
-				if i > 0 {
-					fmt.Fprint(pw, "\t")
-				}
-				fmt.Fprintf(pw, "%v", val)
+				record[i] = fmt.Sprintf("%v", val)
 			}
-			fmt.Fprintln(pw)
+
+			if err := csvWriter.Write(record); err != nil {
+				pw.CloseWithError(fmt.Errorf("failed to write row: %w", err))
+				return
+			}
+			csvWriter.Flush()
 		}
 
 		if err := rows.Err(); err != nil {
@@ -175,7 +196,6 @@ func (c *clickHouseClient) QueryStream(ctx context.Context, query string) (io.Re
 			return
 		}
 	}()
-
 	return pr, nil
 }
 

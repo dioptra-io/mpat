@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/dioptra-io/ufuk-research/internal/commands/ch"
 	"github.com/dioptra-io/ufuk-research/internal/commands/command"
 	"github.com/dioptra-io/ufuk-research/internal/commands/iris"
 	"github.com/dioptra-io/ufuk-research/internal/commands/serve"
@@ -81,6 +82,7 @@ func main() {
 	rootCmd.AddCommand(serve.ServeCmd())
 	rootCmd.AddCommand(command.CommandCmd())
 	rootCmd.AddCommand(iris.IrisCmd())
+	rootCmd.AddCommand(ch.CHCmd())
 
 	// Add the silent and debug flag
 	rootCmd.PersistentFlags().Bool("debug", false, "see debug messages")

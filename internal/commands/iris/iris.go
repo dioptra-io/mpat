@@ -50,6 +50,7 @@ func queryCmd() *cobra.Command {
 
 			// Set silent to true if not already set
 			if !cmd.Flags().Changed("silent") {
+				viper.Set("silent", true)
 				logger.SetLevel(logrus.FatalLevel)
 			}
 
