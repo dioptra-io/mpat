@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -24,20 +25,20 @@ func NewIngestNode() scheduler.Node {
 	})
 }
 
-func onTaskCreate(command *api.Command, task *api.Task) error {
+func onTaskCreate(ctx context.Context, command *api.Command, task *api.Task) error {
 	logger.Debugln("create function is invoked")
 
 	return nil
 }
 
-func onTaskStarted(command *api.Command, task *api.Task) error {
+func onTaskStarted(ctx context.Context, command *api.Command, task *api.Task) error {
 	logger.Debugln("start function is invoked")
 
 	time.Sleep(10 * time.Second)
 	return errors.New("this is an error")
 }
 
-func onTaskRestarted(command *api.Command, task *api.Task) error {
+func onTaskRestarted(ctx context.Context, command *api.Command, task *api.Task) error {
 	logger.Debugln("restart function is invoked")
 	return nil
 }

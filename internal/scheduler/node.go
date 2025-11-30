@@ -1,6 +1,8 @@
 package scheduler
 
 import (
+	"context"
+
 	"github.com/dioptra-io/ufuk-research/internal/api"
 )
 
@@ -22,9 +24,10 @@ type templateNode struct {
 	cfg       *NodeConfig
 	eventChan chan api.Event
 	errChan   chan error
+	ctx       context.Context
 }
 
-type EventHandleFn func(command *api.Command, task *api.Task) error
+type EventHandleFn func(ctx context.Context, command *api.Command, task *api.Task) error
 
 type ExitHandler func()
 
@@ -54,28 +57,35 @@ type NodeConfig struct {
 
 // This will create a new node and starts a separate go routine for the handlers.
 func SpawnNode(cfg *NodeConfig) Node {
+	ctx, cancel := context.WithCancel(context.Background())
+
 	m := &templateNode{
 		cfg:       cfg,
 		eventChan: make(chan api.Event, cfg.ChanLength),
 		errChan:   make(chan error, cfg.ChanLength),
+		ctx:       ctx,
 	}
 
 	go func() {
 		defer close(m.errChan)
 		defer close(m.eventChan)
+		defer cancel()
 
+		// This needs some adjustments as the context cannot be cancelled before the next event is
+		// processed. TODO.
 		for event := range m.eventChan {
 			switch event.EventType {
 			case api.OnTaskCreated:
-				m.errChan <- cfg.OnTaskCreated(event.Command, event.Task)
+				m.errChan <- cfg.OnTaskCreated(ctx, event.Command, event.Task)
 
 			case api.OnTaskStarted:
-				m.errChan <- cfg.OnTaskStarted(event.Command, event.Task)
+				m.errChan <- cfg.OnTaskStarted(ctx, event.Command, event.Task)
 
 			case api.OnTaskRestarted:
-				m.errChan <- cfg.OnTaskRestarted(event.Command, event.Task)
+				m.errChan <- cfg.OnTaskRestarted(ctx, event.Command, event.Task)
 
 			case api.OnSchedulerExit:
+				cancel()
 				if cfg.OnExit != nil {
 					cfg.OnExit()
 				}
