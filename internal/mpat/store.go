@@ -9,7 +9,7 @@ import (
 
 var ErrTaskNotFound = errors.New("task not found")
 
-type WorkerStore interface {
+type MPATStore interface {
 	CreateTask(ctx context.Context, req api.CreateTaskRequest) (api.Task, error)
 	GetTask(ctx context.Context, taskUUID string) (api.Task, error)
 	ListTasks(ctx context.Context) ([]api.Task, error)

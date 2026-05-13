@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/dioptra-io/ufuk-research/internal/api"
-	"github.com/dioptra-io/ufuk-research/internal/client"
+	"github.com/dioptra-io/ufuk-research/internal/mpat"
 	"github.com/spf13/cobra"
 )
 
@@ -68,7 +68,7 @@ func printTasks(tasks []api.Task) error {
 }
 
 func getTasks(ctx context.Context, status string) error {
-	client := client.NewClient(addr)
+	client := mpat.NewClient(addr)
 
 	tasks, err := client.ListTasks(ctx, status)
 	if err != nil {

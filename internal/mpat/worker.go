@@ -19,13 +19,13 @@ import (
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 )
 
-type WorkerConfig struct {
+type MPATServerConfig struct {
 	Addr       string
 	QueueSize  int
 	NumWorkers int
 }
 
-func (cfg *WorkerConfig) validate() error {
+func (cfg *MPATServerConfig) validate() error {
 	if cfg.Addr == "" {
 		cfg.Addr = "localhost:9293"
 	}
@@ -41,10 +41,10 @@ func (cfg *WorkerConfig) validate() error {
 	return nil
 }
 
-type Worker struct {
+type MPATServer struct {
 	queue      chan string
 	server     *http.Server
-	store      WorkerStore
+	store      MPATStore
 	logger     *slog.Logger
 	numWorkers int
 
@@ -52,7 +52,7 @@ type Worker struct {
 	taskCancelCh map[string]chan struct{}
 }
 
-func NewWorkerFromConfig(cfg WorkerConfig, workerStore WorkerStore, logger *slog.Logger) (*Worker, error) {
+func NewMPATServer(cfg MPATServerConfig, workerStore MPATStore, logger *slog.Logger) (*MPATServer, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("worker config cannot be validated: %w", err)
 	}
@@ -65,7 +65,7 @@ func NewWorkerFromConfig(cfg WorkerConfig, workerStore WorkerStore, logger *slog
 		return nil, fmt.Errorf("logger cannot be nil")
 	}
 
-	w := &Worker{
+	w := &MPATServer{
 		queue:        make(chan string, cfg.QueueSize),
 		store:        workerStore,
 		logger:       logger,
@@ -104,7 +104,7 @@ func NewWorkerFromConfig(cfg WorkerConfig, workerStore WorkerStore, logger *slog
 	return w, nil
 }
 
-func (w *Worker) Run(ctx context.Context) error {
+func (w *MPATServer) Run(ctx context.Context) error {
 	g, ctx := errgroup.WithContext(ctx)
 
 	if err := w.recoverUnterminatedTasks(ctx); err != nil {
@@ -148,7 +148,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	return g.Wait()
 }
 
-func (w *Worker) recoverUnterminatedTasks(ctx context.Context) error {
+func (w *MPATServer) recoverUnterminatedTasks(ctx context.Context) error {
 	w.logger.Info("recovering unterminated tasks")
 
 	tasks, err := w.store.ListTasksByStatus(
@@ -200,7 +200,7 @@ func (w *Worker) recoverUnterminatedTasks(ctx context.Context) error {
 	return nil
 }
 
-func (w *Worker) runWorker(ctx context.Context, id int) {
+func (w *MPATServer) runWorker(ctx context.Context, id int) {
 	w.logger.Info("worker started", "worker_id", id)
 
 	for {
@@ -225,7 +225,7 @@ func (w *Worker) runWorker(ctx context.Context, id int) {
 	}
 }
 
-func (w *Worker) processTask(ctx context.Context, workerID int, taskUUID string, taskCancelCh <-chan struct{}) {
+func (w *MPATServer) processTask(ctx context.Context, workerID int, taskUUID string, taskCancelCh <-chan struct{}) {
 	w.logger.Info(
 		"processing task",
 		"worker_id", workerID,
@@ -283,7 +283,7 @@ func (w *Worker) processTask(ctx context.Context, workerID int, taskUUID string,
 // @Produce      plain
 // @Success      200  {string}  string  "ok"
 // @Router       /healthz [get]
-func (w *Worker) handleGetHealthz(rw http.ResponseWriter, r *http.Request) {
+func (w *MPATServer) handleGetHealthz(rw http.ResponseWriter, r *http.Request) {
 	rw.WriteHeader(http.StatusOK)
 	_, _ = rw.Write([]byte("ok\n"))
 }
@@ -301,7 +301,7 @@ func (w *Worker) handleGetHealthz(rw http.ResponseWriter, r *http.Request) {
 // @Failure      503      {object}  api.ErrorResponse
 // @Failure      500      {object}  api.ErrorResponse
 // @Router       /tasks [post]
-func (w *Worker) handlePostTasks(rw http.ResponseWriter, r *http.Request) {
+func (w *MPATServer) handlePostTasks(rw http.ResponseWriter, r *http.Request) {
 	var req api.CreateTaskRequest
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -339,7 +339,7 @@ func (w *Worker) handlePostTasks(rw http.ResponseWriter, r *http.Request) {
 // @Success      200  {array}   api.Task
 // @Failure      500  {object}  api.ErrorResponse
 // @Router       /tasks [get]
-func (w *Worker) handleGetTasks(rw http.ResponseWriter, r *http.Request) {
+func (w *MPATServer) handleGetTasks(rw http.ResponseWriter, r *http.Request) {
 	tasks, err := w.store.ListTasks(r.Context())
 	if err != nil {
 		w.logger.Error("failed to list tasks", "error", err)
@@ -362,7 +362,7 @@ func (w *Worker) handleGetTasks(rw http.ResponseWriter, r *http.Request) {
 // @Failure      404        {object}  api.ErrorResponse
 // @Failure      500        {object}  api.ErrorResponse
 // @Router       /tasks/{task_uuid} [get]
-func (w *Worker) handleGetTask(rw http.ResponseWriter, r *http.Request) {
+func (w *MPATServer) handleGetTask(rw http.ResponseWriter, r *http.Request) {
 	taskUUID := r.PathValue("task_uuid")
 	if taskUUID == "" {
 		writeError(rw, http.StatusBadRequest, "task uuid is required")
@@ -395,7 +395,7 @@ func (w *Worker) handleGetTask(rw http.ResponseWriter, r *http.Request) {
 // @Failure      404        {object}  api.ErrorResponse
 // @Failure      500        {object}  api.ErrorResponse
 // @Router       /tasks/{task_uuid}/cancel [post]
-func (w *Worker) handlePostCancelTask(rw http.ResponseWriter, r *http.Request) {
+func (w *MPATServer) handlePostCancelTask(rw http.ResponseWriter, r *http.Request) {
 	taskUUID := r.PathValue("task_uuid")
 	if taskUUID == "" {
 		writeError(rw, http.StatusBadRequest, "task uuid is required")
@@ -446,7 +446,7 @@ func (w *Worker) handlePostCancelTask(rw http.ResponseWriter, r *http.Request) {
 // @Success      200  {array}   api.Task
 // @Failure      500  {object}  api.ErrorResponse
 // @Router       /tasks/queued [get]
-func (w *Worker) handleGetQueuedTasks(rw http.ResponseWriter, r *http.Request) {
+func (w *MPATServer) handleGetQueuedTasks(rw http.ResponseWriter, r *http.Request) {
 	w.handleTasksByStatus(rw, r, api.TaskStatusQueued)
 }
 
@@ -459,7 +459,7 @@ func (w *Worker) handleGetQueuedTasks(rw http.ResponseWriter, r *http.Request) {
 // @Success      200  {array}   api.Task
 // @Failure      500  {object}  api.ErrorResponse
 // @Router       /tasks/running [get]
-func (w *Worker) handleGetRunningTasks(rw http.ResponseWriter, r *http.Request) {
+func (w *MPATServer) handleGetRunningTasks(rw http.ResponseWriter, r *http.Request) {
 	w.handleTasksByStatus(rw, r, api.TaskStatusRunning)
 }
 
@@ -472,7 +472,7 @@ func (w *Worker) handleGetRunningTasks(rw http.ResponseWriter, r *http.Request) 
 // @Success      200  {array}   api.Task
 // @Failure      500  {object}  api.ErrorResponse
 // @Router       /tasks/done [get]
-func (w *Worker) handleGetDoneTasks(rw http.ResponseWriter, r *http.Request) {
+func (w *MPATServer) handleGetDoneTasks(rw http.ResponseWriter, r *http.Request) {
 	w.handleTasksByStatus(rw, r, api.TaskStatusDone)
 }
 
@@ -485,7 +485,7 @@ func (w *Worker) handleGetDoneTasks(rw http.ResponseWriter, r *http.Request) {
 // @Success      200  {array}   api.Task
 // @Failure      500  {object}  api.ErrorResponse
 // @Router       /tasks/failed [get]
-func (w *Worker) handleGetFailedTasks(rw http.ResponseWriter, r *http.Request) {
+func (w *MPATServer) handleGetFailedTasks(rw http.ResponseWriter, r *http.Request) {
 	w.handleTasksByStatus(rw, r, api.TaskStatusFailed)
 }
 
@@ -498,7 +498,7 @@ func (w *Worker) handleGetFailedTasks(rw http.ResponseWriter, r *http.Request) {
 // @Success      200  {array}   api.Task
 // @Failure      500  {object}  api.ErrorResponse
 // @Router       /tasks/canceled [get]
-func (w *Worker) handleGetCanceledTasks(rw http.ResponseWriter, r *http.Request) {
+func (w *MPATServer) handleGetCanceledTasks(rw http.ResponseWriter, r *http.Request) {
 	w.handleTasksByStatus(rw, r, api.TaskStatusCancelled)
 }
 
@@ -511,7 +511,7 @@ func (w *Worker) handleGetCanceledTasks(rw http.ResponseWriter, r *http.Request)
 // @Success      200  {array}   api.Task
 // @Failure      500  {object}  api.ErrorResponse
 // @Router       /tasks/terminated [get]
-func (w *Worker) handleGetTerminatedTasks(rw http.ResponseWriter, r *http.Request) {
+func (w *MPATServer) handleGetTerminatedTasks(rw http.ResponseWriter, r *http.Request) {
 	w.handleTasksByStatus(
 		rw,
 		r,
@@ -520,7 +520,7 @@ func (w *Worker) handleGetTerminatedTasks(rw http.ResponseWriter, r *http.Reques
 		api.TaskStatusCancelled,
 	)
 }
-func (w *Worker) handleTasksByStatus(rw http.ResponseWriter, r *http.Request, status ...api.TaskStatus) {
+func (w *MPATServer) handleTasksByStatus(rw http.ResponseWriter, r *http.Request, status ...api.TaskStatus) {
 	ctx := r.Context()
 
 	tasks, err := w.store.ListTasksByStatus(ctx, status...)

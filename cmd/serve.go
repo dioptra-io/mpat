@@ -34,14 +34,14 @@ and processes them asynchronously using worker goroutines.`,
 		)
 		defer cancel()
 
-		var workerStore mpat.WorkerStore
+		var workerStore mpat.MPATStore
 		if serveDatabaseFile == ":memory:" {
-			workerStore = mpat.NewInMemoryWorkerStore()
+			workerStore = mpat.NewMPATMemoryStore()
 		} else {
 			panic("not implemented the non-emphemeral worker store")
 		}
 
-		w, err := mpat.NewWorkerFromConfig(mpat.WorkerConfig{
+		w, err := mpat.NewMPATServer(mpat.MPATServerConfig{
 			Addr:       serveAddr,
 			NumWorkers: serveNumWorkers,
 			QueueSize:  1024,

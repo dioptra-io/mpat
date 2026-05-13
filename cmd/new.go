@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/dioptra-io/ufuk-research/internal/api"
-	"github.com/dioptra-io/ufuk-research/internal/client"
+	"github.com/dioptra-io/ufuk-research/internal/mpat"
 	"github.com/spf13/cobra"
 )
 
@@ -36,7 +36,7 @@ var newRetinaStreamCmd = &cobra.Command{
 			},
 		}
 
-		client := client.NewClient(addr)
+		client := mpat.NewClient(addr)
 		createdTask, err := client.CreateTask(cmd.Context(), task)
 		if err != nil {
 			return err

@@ -12,13 +12,13 @@ import (
 	"github.com/dioptra-io/ufuk-research/internal/api"
 )
 
-type Client struct {
+type MPATClient struct {
 	baseURL    string
 	httpClient *http.Client
 }
 
-func NewClient(baseURL string) *Client {
-	return &Client{
+func NewClient(baseURL string) *MPATClient {
+	return &MPATClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
@@ -26,7 +26,7 @@ func NewClient(baseURL string) *Client {
 	}
 }
 
-func (c *Client) ListTasks(ctx context.Context, status string) ([]api.Task, error) {
+func (c *MPATClient) ListTasks(ctx context.Context, status string) ([]api.Task, error) {
 	url := c.baseURL + "/tasks/" + status
 	if status == "" {
 		url = c.baseURL + "/tasks"
@@ -55,7 +55,7 @@ func (c *Client) ListTasks(ctx context.Context, status string) ([]api.Task, erro
 	return tasks, nil
 }
 
-func (c *Client) CreateTask(ctx context.Context, task api.Task) (*api.Task, error) {
+func (c *MPATClient) CreateTask(ctx context.Context, task api.Task) (*api.Task, error) {
 	body, err := json.Marshal(task)
 	if err != nil {
 		return nil, err
@@ -88,7 +88,7 @@ func (c *Client) CreateTask(ctx context.Context, task api.Task) (*api.Task, erro
 	return &createdTask, nil
 }
 
-func (c *Client) CancelTask(ctx context.Context, uuid string) error {
+func (c *MPATClient) CancelTask(ctx context.Context, uuid string) error {
 	if uuid == "" {
 		return fmt.Errorf("cancel task: uuid is required")
 	}

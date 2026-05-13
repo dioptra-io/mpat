@@ -9,18 +9,18 @@ import (
 	"github.com/google/uuid"
 )
 
-type InMemoryWorkerStore struct {
+type MPATMemoryStore struct {
 	mu    sync.RWMutex
 	tasks map[string]api.Task
 }
 
-func NewInMemoryWorkerStore() *InMemoryWorkerStore {
-	return &InMemoryWorkerStore{
+func NewMPATMemoryStore() *MPATMemoryStore {
+	return &MPATMemoryStore{
 		tasks: make(map[string]api.Task),
 	}
 }
 
-func (s *InMemoryWorkerStore) CreateTask(ctx context.Context, req api.CreateTaskRequest) (api.Task, error) {
+func (s *MPATMemoryStore) CreateTask(ctx context.Context, req api.CreateTaskRequest) (api.Task, error) {
 	if err := ctx.Err(); err != nil {
 		return api.Task{}, err
 	}
@@ -42,7 +42,7 @@ func (s *InMemoryWorkerStore) CreateTask(ctx context.Context, req api.CreateTask
 	return task, nil
 }
 
-func (s *InMemoryWorkerStore) GetTask(ctx context.Context, taskUUID string) (api.Task, error) {
+func (s *MPATMemoryStore) GetTask(ctx context.Context, taskUUID string) (api.Task, error) {
 	if err := ctx.Err(); err != nil {
 		return api.Task{}, err
 	}
@@ -58,7 +58,7 @@ func (s *InMemoryWorkerStore) GetTask(ctx context.Context, taskUUID string) (api
 	return task, nil
 }
 
-func (s *InMemoryWorkerStore) ListTasks(ctx context.Context) ([]api.Task, error) {
+func (s *MPATMemoryStore) ListTasks(ctx context.Context) ([]api.Task, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (s *InMemoryWorkerStore) ListTasks(ctx context.Context) ([]api.Task, error)
 	return tasks, nil
 }
 
-func (s *InMemoryWorkerStore) ListTasksByStatus(ctx context.Context, statuses ...api.TaskStatus) ([]api.Task, error) {
+func (s *MPATMemoryStore) ListTasksByStatus(ctx context.Context, statuses ...api.TaskStatus) ([]api.Task, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func (s *InMemoryWorkerStore) ListTasksByStatus(ctx context.Context, statuses ..
 	return tasks, nil
 }
 
-func (s *InMemoryWorkerStore) UpdateTaskStatus(ctx context.Context, taskUUID string, status api.TaskStatus) error {
+func (s *MPATMemoryStore) UpdateTaskStatus(ctx context.Context, taskUUID string, status api.TaskStatus) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func (s *InMemoryWorkerStore) UpdateTaskStatus(ctx context.Context, taskUUID str
 	return nil
 }
 
-func (s *InMemoryWorkerStore) CancelTask(ctx context.Context, taskUUID string) (api.Task, error) {
+func (s *MPATMemoryStore) CancelTask(ctx context.Context, taskUUID string) (api.Task, error) {
 	if err := ctx.Err(); err != nil {
 		return api.Task{}, err
 	}
