@@ -7,8 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/dioptra-io/ufuk-research/internal/store"
-	"github.com/dioptra-io/ufuk-research/internal/worker"
+	"github.com/dioptra-io/ufuk-research/internal/mpat"
 	"github.com/spf13/cobra"
 )
 
@@ -35,14 +34,14 @@ and processes them asynchronously using worker goroutines.`,
 		)
 		defer cancel()
 
-		var workerStore store.WorkerStore
+		var workerStore mpat.WorkerStore
 		if serveDatabaseFile == ":memory:" {
-			workerStore = store.NewInMemoryWorkerStore()
+			workerStore = mpat.NewInMemoryWorkerStore()
 		} else {
 			panic("not implemented the non-emphemeral worker store")
 		}
 
-		w, err := worker.NewWorkerFromConfig(worker.WorkerConfig{
+		w, err := mpat.NewWorkerFromConfig(mpat.WorkerConfig{
 			Addr:       serveAddr,
 			NumWorkers: serveNumWorkers,
 			QueueSize:  1024,

@@ -1,4 +1,4 @@
-package worker
+package mpat
 
 import (
 	"context"
@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 
 	"github.com/dioptra-io/ufuk-research/internal/api"
-	"github.com/dioptra-io/ufuk-research/internal/store"
 
 	"golang.org/x/sync/errgroup"
 
@@ -45,7 +44,7 @@ func (cfg *WorkerConfig) validate() error {
 type Worker struct {
 	queue      chan string
 	server     *http.Server
-	store      store.WorkerStore
+	store      WorkerStore
 	logger     *slog.Logger
 	numWorkers int
 
@@ -53,7 +52,7 @@ type Worker struct {
 	taskCancelCh map[string]chan struct{}
 }
 
-func NewWorkerFromConfig(cfg WorkerConfig, workerStore store.WorkerStore, logger *slog.Logger) (*Worker, error) {
+func NewWorkerFromConfig(cfg WorkerConfig, workerStore WorkerStore, logger *slog.Logger) (*Worker, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("worker config cannot be validated: %w", err)
 	}
@@ -371,7 +370,7 @@ func (w *Worker) handleGetTask(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	task, err := w.store.GetTask(r.Context(), taskUUID)
-	if errors.Is(err, store.ErrTaskNotFound) {
+	if errors.Is(err, ErrTaskNotFound) {
 		writeError(rw, http.StatusNotFound, "task not found")
 		return
 	}
@@ -412,7 +411,7 @@ func (w *Worker) handlePostCancelTask(rw http.ResponseWriter, r *http.Request) {
 
 	if !ok {
 		task, err := w.store.CancelTask(r.Context(), taskUUID)
-		if errors.Is(err, store.ErrTaskNotFound) {
+		if errors.Is(err, ErrTaskNotFound) {
 			writeError(rw, http.StatusNotFound, "task not found")
 			return
 		}

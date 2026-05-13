@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/dioptra-io/ufuk-research/internal/client"
+	"github.com/dioptra-io/ufuk-research/internal/mpat"
 	"github.com/spf13/cobra"
 )
 
@@ -14,7 +14,7 @@ var cancelCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		taskUUID := args[0]
 
-		client := client.NewClient(addr)
+		client := mpat.NewClient(addr)
 
 		if err := client.CancelTask(cmd.Context(), taskUUID); err != nil {
 			return err
