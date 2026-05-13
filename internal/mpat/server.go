@@ -52,7 +52,7 @@ type MPATServer struct {
 	taskCancelCh map[string]chan struct{}
 }
 
-func NewMPATServer(cfg MPATServerConfig, workerStore MPATStore, logger *slog.Logger) (*MPATServer, error) {
+func NewServer(cfg MPATServerConfig, workerStore MPATStore, logger *slog.Logger) (*MPATServer, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("worker config cannot be validated: %w", err)
 	}
