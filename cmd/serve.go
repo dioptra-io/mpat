@@ -41,7 +41,7 @@ and processes them asynchronously using worker goroutines.`,
 			panic("not implemented the non-emphemeral worker store")
 		}
 
-		w, err := mpat.NewMPATServer(mpat.MPATServerConfig{
+		w, err := mpat.NewServer(mpat.MPATServerConfig{
 			Addr:       serveAddr,
 			NumWorkers: serveNumWorkers,
 			QueueSize:  1024,

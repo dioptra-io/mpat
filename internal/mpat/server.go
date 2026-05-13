@@ -226,52 +226,48 @@ func (w *MPATServer) runWorker(ctx context.Context, id int) {
 }
 
 func (w *MPATServer) processTask(ctx context.Context, workerID int, taskUUID string, taskCancelCh <-chan struct{}) {
-	w.logger.Info(
-		"processing task",
-		"worker_id", workerID,
-		"task_uuid", taskUUID,
-	)
+	taskCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+
+	go func() {
+		select {
+		case <-taskCancelCh:
+			cancel(ErrTaskCancelled)
+
+		case <-taskCtx.Done():
+		}
+	}()
+
+	w.logger.Info("processing task", "worker_id", workerID, "task_uuid", taskUUID)
 
 	if err := w.store.UpdateTaskStatus(ctx, taskUUID, api.TaskStatusRunning); err != nil {
 		w.logger.Error("failed to mark task as running", "task_uuid", taskUUID, "error", err)
 		return
 	}
 
-	select {
-	case <-ctx.Done():
-		if err := w.store.UpdateTaskStatus(context.Background(), taskUUID, api.TaskStatusCancelled); err != nil {
-			w.logger.Error("failed to mark task as cancelled", "task_uuid", taskUUID, "error", err)
-		}
+	task, err := w.store.GetTask(ctx, taskUUID)
+	if err != nil {
+		w.logger.Error("failed to get task", "task_uuid", taskUUID, "error", err)
 		return
+	}
 
-	case <-taskCancelCh:
-		if err := w.store.UpdateTaskStatus(context.Background(), taskUUID, api.TaskStatusCancelled); err != nil {
-			w.logger.Error("failed to mark task as cancelled", "task_uuid", taskUUID, "error", err)
-		}
-		return
-
-	case <-time.NewTimer(time.Second * 10).C:
-		task, err := w.store.GetTask(ctx, taskUUID)
-		if err != nil {
-			w.logger.Error("failed to mark task as cancelled", "task_uuid", taskUUID, "error", err)
-		}
-		slog.Info("processed task", "task_uuid", taskUUID)
-
-		// DO a selection here for how to process the task.
-		if task.RetinaStream != nil {
-			fmt.Printf("task.RetinaStream.OutputFile: %v\n", task.RetinaStream.OutputFile)
+	if err := handleRetinaStreaming(taskCtx, &task, workerID); err != nil {
+		if errors.Is(ErrTaskCancelled, err) {
+			if err := w.store.UpdateTaskStatus(ctx, taskUUID, api.TaskStatusCancelled); err != nil {
+				w.logger.Error("failed to mark task as cancelled", "task_uuid", taskUUID, "error", err)
+				return
+			}
 		} else {
-			slog.Info("unknown task type", "task_uuid", taskUUID)
 			if err := w.store.UpdateTaskStatus(ctx, taskUUID, api.TaskStatusFailed); err != nil {
-				w.logger.Error("failed to mark task as done", "task_uuid", taskUUID, "error", err)
+				w.logger.Error("failed to mark task as failed", "task_uuid", taskUUID, "error", err)
 				return
 			}
 		}
-	}
-
-	if err := w.store.UpdateTaskStatus(ctx, taskUUID, api.TaskStatusDone); err != nil {
-		w.logger.Error("failed to mark task as done", "task_uuid", taskUUID, "error", err)
-		return
+	} else {
+		if err := w.store.UpdateTaskStatus(ctx, taskUUID, api.TaskStatusDone); err != nil {
+			w.logger.Error("failed to mark task as done", "task_uuid", taskUUID, "error", err)
+			return
+		}
 	}
 }
 
