@@ -87,3 +87,28 @@ func (c *Client) CreateTask(ctx context.Context, task api.Task) (*api.Task, erro
 
 	return &createdTask, nil
 }
+
+func (c *Client) CancelTask(ctx context.Context, uuid string) error {
+	if uuid == "" {
+		return fmt.Errorf("cancel task: uuid is required")
+	}
+
+	url := c.baseURL + "/tasks/" + uuid + "/cancel"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("cancel task: unexpected status %s", resp.Status)
+	}
+
+	return nil
+}

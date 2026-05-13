@@ -1,39 +1,31 @@
-/*
-Copyright © 2026 NAME HERE <EMAIL ADDRESS>
-*/
 package cmd
 
 import (
 	"fmt"
 
+	"github.com/dioptra-io/ufuk-research/internal/client"
 	"github.com/spf13/cobra"
 )
 
-// cancelCmd represents the cancel command
 var cancelCmd = &cobra.Command{
-	Use:   "cancel",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
+	Use:   "cancel <task-uuid>",
+	Short: "Cancel a task",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		taskUUID := args[0]
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("cancel called")
+		client := client.NewClient(addr)
+
+		if err := client.CancelTask(cmd.Context(), taskUUID); err != nil {
+			return err
+		}
+
+		fmt.Println(taskUUID)
+
+		return nil
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(cancelCmd)
-
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// cancelCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// cancelCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }
