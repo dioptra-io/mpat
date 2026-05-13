@@ -15,8 +15,9 @@ const (
 )
 
 type Task struct {
-	UUID   string     `json:"uuid"`
-	Status TaskStatus `json:"status"`
+	UUID    string     `json:"uuid"`
+	Status  TaskStatus `json:"status"`
+	Created time.Time  `json:"created"`
 
 	// One of
 	RetinaStream *RetinaStreamTaskRequest `json:"retina_stream,omitempty"`
@@ -24,7 +25,7 @@ type Task struct {
 
 func (t *Task) Type() string {
 	if t.RetinaStream != nil {
-		return "retina_stream"
+		return "Retina Stream"
 	}
 	return "unkwnown"
 }

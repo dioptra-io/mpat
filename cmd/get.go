@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"text/tabwriter"
+	"time"
 
 	"github.com/dioptra-io/ufuk-research/internal/api"
 	"github.com/dioptra-io/ufuk-research/internal/client"
@@ -33,19 +34,32 @@ func newStatusCmd(name, status string) *cobra.Command {
 	}
 }
 
+func humanDuration(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+}
+
 func printTasks(tasks []api.Task) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	defer func() { _ = w.Flush() }()
 
-	_, _ = fmt.Fprintln(w, "UUID\tSTATUS\tTYPE")
+	_, _ = fmt.Fprintln(w, "UUID\tSTATUS\tAGE\tTYPE")
 
 	for _, task := range tasks {
-
 		_, _ = fmt.Fprintf(
 			w,
-			"%s\t%s\t%s\n",
+			"%s\t%s\t%s\t%s\n",
 			task.UUID,
 			task.Status,
+			humanDuration(time.Since(task.Created)),
 			task.Type(),
 		)
 	}

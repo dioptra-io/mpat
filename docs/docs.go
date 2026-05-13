@@ -431,6 +431,9 @@ const docTemplate = `{
         "api.Task": {
             "type": "object",
             "properties": {
+                "created": {
+                    "type": "string"
+                },
                 "retina_stream": {
                     "description": "One of",
                     "allOf": [

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/dioptra-io/ufuk-research/internal/api"
 	"github.com/google/uuid"
@@ -29,6 +30,7 @@ func (s *InMemoryWorkerStore) CreateTask(ctx context.Context, req api.CreateTask
 	task := api.Task{
 		UUID:         taskUUID,
 		Status:       api.TaskStatus(api.TaskStatusQueued),
+		Created:      time.Now(),
 		RetinaStream: req.RetinaStream,
 	}
 
