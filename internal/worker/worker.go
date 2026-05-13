@@ -257,7 +257,17 @@ func (w *Worker) processTask(ctx context.Context, workerID int, taskUUID string,
 			w.logger.Error("failed to mark task as cancelled", "task_uuid", taskUUID, "error", err)
 		}
 		slog.Info("processed task", "task_uuid", taskUUID)
-		fmt.Printf("task.Get.Retina.DurationSeconds: %v\n", task.Get.Retina.DurationSeconds)
+
+		// DO a selection here for how to process the task.
+		if task.RetinaStream != nil {
+			fmt.Printf("task.RetinaStream.OutputFile: %v\n", task.RetinaStream.OutputFile)
+		} else {
+			slog.Info("unknown task type", "task_uuid", taskUUID)
+			if err := w.store.UpdateTaskStatus(ctx, taskUUID, api.TaskStatusFailed); err != nil {
+				w.logger.Error("failed to mark task as done", "task_uuid", taskUUID, "error", err)
+				return
+			}
+		}
 	}
 
 	if err := w.store.UpdateTaskStatus(ctx, taskUUID, api.TaskStatusDone); err != nil {
@@ -297,11 +307,6 @@ func (w *Worker) handlePostTasks(rw http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(rw, http.StatusBadRequest, "invalid json body")
-		return
-	}
-
-	if req.Get == nil {
-		writeError(rw, http.StatusBadRequest, "get_task is required")
 		return
 	}
 

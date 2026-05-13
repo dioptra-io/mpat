@@ -1,39 +1,79 @@
-/*
-Copyright © 2026 NAME HERE <EMAIL ADDRESS>
-*/
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"text/tabwriter"
 
+	"github.com/dioptra-io/ufuk-research/internal/api"
+	"github.com/dioptra-io/ufuk-research/internal/client"
 	"github.com/spf13/cobra"
 )
 
-// getCmd represents the get command
 var getCmd = &cobra.Command{
 	Use:   "get",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("get called")
+	Short: "Get the tasks with applied filtering",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return getTasks(cmd.Context(), "")
 	},
+}
+
+func newStatusCmd(name, status string) *cobra.Command {
+	shortName := "List " + status + " tasks"
+	if status == "" {
+		shortName = "List all tasks"
+	}
+	return &cobra.Command{
+		Use:   name,
+		Short: shortName,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return getTasks(cmd.Context(), status)
+		},
+	}
+}
+
+func printTasks(tasks []api.Task) error {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	defer func() { _ = w.Flush() }()
+
+	_, _ = fmt.Fprintln(w, "UUID\tSTATUS\tTYPE")
+
+	for _, task := range tasks {
+
+		_, _ = fmt.Fprintf(
+			w,
+			"%s\t%s\t%s\n",
+			task.UUID,
+			task.Status,
+			task.Type(),
+		)
+	}
+
+	return nil
+}
+
+func getTasks(ctx context.Context, status string) error {
+	client := client.NewClient(addr)
+
+	tasks, err := client.ListTasks(ctx, status)
+	if err != nil {
+		return err
+	}
+
+	return printTasks(tasks)
 }
 
 func init() {
 	rootCmd.AddCommand(getCmd)
 
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// getCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// getCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	getCmd.AddCommand(
+		newStatusCmd("queued", "queued"),
+		newStatusCmd("running", "running"),
+		newStatusCmd("done", "done"),
+		newStatusCmd("failed", "failed"),
+		newStatusCmd("canceled", "canceled"),
+		newStatusCmd("terminamed", "terminated"),
+		newStatusCmd("all", ""),
+	)
 }

@@ -15,42 +15,28 @@ const (
 )
 
 type Task struct {
-	UUID      string     `json:"uuid"`
-	Status    TaskStatus `json:"status"`
-	Artifacts []Artifact `json:"artifacts"`
+	UUID   string     `json:"uuid"`
+	Status TaskStatus `json:"status"`
 
-	// One of Get
-	Get *GetTask `json:"get,omitempty"`
+	// One of
+	RetinaStream *RetinaStreamTaskRequest `json:"retina_stream,omitempty"`
 }
 
-type GetTask struct {
-	// One of Retina, GetIrisTask, GetArkTask
-	Retina *GetRetinaTask `json:"retina,omitempty"`
-	Iris   *GetIrisTask   `json:"iris,omitempty"`
-	Ark    *GetArkTask    `json:"ark,omitempty"`
+func (t *Task) Type() string {
+	if t.RetinaStream != nil {
+		return "retina_stream"
+	}
+	return "unkwnown"
 }
 
-type GetRetinaTask struct {
+type RetinaStreamTaskRequest struct {
 	Endpoint        string `json:"endpoint"`
-	Live            bool   `json:"live"`
 	DurationSeconds int64  `json:"duration_seconds" example:"60"`
+	OutputFile      string `json:"output_file"`
 }
 
-func (t GetRetinaTask) Duration() time.Duration {
+func (t RetinaStreamTaskRequest) Duration() time.Duration {
 	return time.Duration(t.DurationSeconds) * time.Second
-}
-
-type GetIrisTask struct {
-	Endpoint string `json:"endpoint"`
-	// TODO
-}
-
-type GetArkTask struct {
-	Endpoint string `json:"endpoint"`
-	// TODO
-}
-
-type Artifact struct {
 }
 
 // Server objects.
@@ -59,8 +45,8 @@ type ErrorResponse struct {
 }
 
 type CreateTaskRequest struct {
-	// One of Get
-	Get *GetTask `json:"get,omitempty"`
+	// One of
+	RetinaStream *RetinaStreamTaskRequest `json:"retina_stream,omitempty"`
 }
 
 type CreateTaskResponse struct {

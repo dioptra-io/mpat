@@ -384,17 +384,14 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "api.Artifact": {
-            "type": "object"
-        },
         "api.CreateTaskRequest": {
             "type": "object",
             "properties": {
-                "get": {
-                    "description": "One of Get",
+                "retina_stream": {
+                    "description": "One of",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/api.GetTask"
+                            "$ref": "#/definitions/api.RetinaStreamTaskRequest"
                         }
                     ]
                 }
@@ -416,23 +413,7 @@ const docTemplate = `{
                 }
             }
         },
-        "api.GetArkTask": {
-            "type": "object",
-            "properties": {
-                "endpoint": {
-                    "type": "string"
-                }
-            }
-        },
-        "api.GetIrisTask": {
-            "type": "object",
-            "properties": {
-                "endpoint": {
-                    "type": "string"
-                }
-            }
-        },
-        "api.GetRetinaTask": {
+        "api.RetinaStreamTaskRequest": {
             "type": "object",
             "properties": {
                 "duration_seconds": {
@@ -442,44 +423,19 @@ const docTemplate = `{
                 "endpoint": {
                     "type": "string"
                 },
-                "live": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "api.GetTask": {
-            "type": "object",
-            "properties": {
-                "ark": {
-                    "$ref": "#/definitions/api.GetArkTask"
-                },
-                "iris": {
-                    "$ref": "#/definitions/api.GetIrisTask"
-                },
-                "retina": {
-                    "description": "One of Retina, GetIrisTask, GetArkTask",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/api.GetRetinaTask"
-                        }
-                    ]
+                "output_file": {
+                    "type": "string"
                 }
             }
         },
         "api.Task": {
             "type": "object",
             "properties": {
-                "artifacts": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/api.Artifact"
-                    }
-                },
-                "get": {
-                    "description": "One of Get",
+                "retina_stream": {
+                    "description": "One of",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/api.GetTask"
+                            "$ref": "#/definitions/api.RetinaStreamTaskRequest"
                         }
                     ]
                 },

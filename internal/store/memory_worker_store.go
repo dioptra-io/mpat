@@ -27,10 +27,9 @@ func (s *InMemoryWorkerStore) CreateTask(ctx context.Context, req api.CreateTask
 	taskUUID := uuid.NewString()
 
 	task := api.Task{
-		UUID:      taskUUID,
-		Status:    api.TaskStatus(api.TaskStatusQueued),
-		Artifacts: []api.Artifact{},
-		Get:       req.Get,
+		UUID:         taskUUID,
+		Status:       api.TaskStatus(api.TaskStatusQueued),
+		RetinaStream: req.RetinaStream,
 	}
 
 	s.mu.Lock()

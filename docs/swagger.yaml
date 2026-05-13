@@ -1,12 +1,10 @@
 definitions:
-  api.Artifact:
-    type: object
   api.CreateTaskRequest:
     properties:
-      get:
+      retina_stream:
         allOf:
-        - $ref: '#/definitions/api.GetTask'
-        description: One of Get
+        - $ref: '#/definitions/api.RetinaStreamTaskRequest'
+        description: One of
     type: object
   api.CreateTaskResponse:
     properties:
@@ -18,47 +16,22 @@ definitions:
       error:
         type: string
     type: object
-  api.GetArkTask:
-    properties:
-      endpoint:
-        type: string
-    type: object
-  api.GetIrisTask:
-    properties:
-      endpoint:
-        type: string
-    type: object
-  api.GetRetinaTask:
+  api.RetinaStreamTaskRequest:
     properties:
       duration_seconds:
         example: 60
         type: integer
       endpoint:
         type: string
-      live:
-        type: boolean
-    type: object
-  api.GetTask:
-    properties:
-      ark:
-        $ref: '#/definitions/api.GetArkTask'
-      iris:
-        $ref: '#/definitions/api.GetIrisTask'
-      retina:
-        allOf:
-        - $ref: '#/definitions/api.GetRetinaTask'
-        description: One of Retina, GetIrisTask, GetArkTask
+      output_file:
+        type: string
     type: object
   api.Task:
     properties:
-      artifacts:
-        items:
-          $ref: '#/definitions/api.Artifact'
-        type: array
-      get:
+      retina_stream:
         allOf:
-        - $ref: '#/definitions/api.GetTask'
-        description: One of Get
+        - $ref: '#/definitions/api.RetinaStreamTaskRequest'
+        description: One of
       status:
         $ref: '#/definitions/api.TaskStatus'
       uuid:

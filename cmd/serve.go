@@ -13,9 +13,9 @@ import (
 )
 
 var (
-	serveAddr  string
-	numWorkers int
-	dbFile     string
+	serveAddr         string
+	serveNumWorkers   int
+	serveDatabaseFile string
 )
 
 // serveCmd represents the serve command
@@ -36,7 +36,7 @@ and processes them asynchronously using worker goroutines.`,
 		defer cancel()
 
 		var workerStore store.WorkerStore
-		if dbFile == ":memory:" {
+		if serveDatabaseFile == ":memory:" {
 			workerStore = store.NewInMemoryWorkerStore()
 		} else {
 			panic("not implemented the non-emphemeral worker store")
@@ -44,7 +44,7 @@ and processes them asynchronously using worker goroutines.`,
 
 		w, err := worker.NewWorkerFromConfig(worker.WorkerConfig{
 			Addr:       serveAddr,
-			NumWorkers: numWorkers,
+			NumWorkers: serveNumWorkers,
 			QueueSize:  1024,
 		}, workerStore, logger)
 		if err != nil {
@@ -54,7 +54,7 @@ and processes them asynchronously using worker goroutines.`,
 		slog.Info(
 			"worker initialized",
 			"addr", serveAddr,
-			"num_workers", numWorkers,
+			"num_workers", serveNumWorkers,
 		)
 
 		if err := w.Run(ctx); err != nil && !errors.Is(err, ctx.Err()) {
@@ -67,7 +67,7 @@ and processes them asynchronously using worker goroutines.`,
 func init() {
 	rootCmd.AddCommand(serveCmd)
 
-	serveCmd.Flags().StringVar(&serveAddr, "addr", "localhost:9293", "http listen address")
-	serveCmd.Flags().IntVar(&numWorkers, "num-workers", 1, "number of concurrent workers")
-	serveCmd.Flags().StringVar(&dbFile, "db-file", ":memory:", "database file for worker store, (:memory: for memory only)")
+	serveCmd.Flags().StringVar(&serveAddr, "address", "localhost:9293", "http listen address")
+	serveCmd.Flags().IntVar(&serveNumWorkers, "num-workers", 1, "number of concurrent workers")
+	serveCmd.Flags().StringVar(&serveDatabaseFile, "db-file", ":memory:", "database file for worker store, (:memory: for memory only)")
 }

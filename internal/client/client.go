@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -52,4 +53,37 @@ func (c *Client) ListTasks(ctx context.Context, status string) ([]api.Task, erro
 	}
 
 	return tasks, nil
+}
+
+func (c *Client) CreateTask(ctx context.Context, task api.Task) (*api.Task, error) {
+	body, err := json.Marshal(task)
+	if err != nil {
+		return nil, err
+	}
+
+	url := c.baseURL + "/tasks"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("create task: unexpected status %s", resp.Status)
+	}
+
+	var createdTask api.Task
+	if err := json.NewDecoder(resp.Body).Decode(&createdTask); err != nil {
+		return nil, err
+	}
+
+	return &createdTask, nil
 }
