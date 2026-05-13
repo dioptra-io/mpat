@@ -75,11 +75,12 @@ build: fmt vet lint swag ## execution Run checks and build the MPAT binary
 	$(GOBUILD) -o $(BUILD_DIR)/$(APP_NAME) .
 
 .PHONY: install
-install: build swag ## execution Build and install binary as mp
+install: build ## execution Build and install binary as mp
 	@mkdir -p $(GOBIN)
-	cp $(BUILD_DIR)/$(APP_NAME) $(GOBIN)/mp
+	install -m 755 $(BUILD_DIR)/$(APP_NAME) $(GOBIN)/mp
+	xattr -c $(GOBIN)/mp || true
+	codesign --force --sign - $(GOBIN)/mp
 	@echo "Installed to $(GOBIN)/mp"
-	@echo Please run "source <(mp completion zsh)" for enabling completions.
 
 .PHONY: run
 run: fmt vet lint swag ## execution Run the application
