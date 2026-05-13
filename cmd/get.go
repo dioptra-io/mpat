@@ -10,6 +10,8 @@ import (
 	"github.com/dioptra-io/ufuk-research/internal/api"
 	"github.com/dioptra-io/ufuk-research/internal/mpat"
 	"github.com/spf13/cobra"
+	"sort"
+	"strings"
 )
 
 var getCmd = &cobra.Command{
@@ -48,19 +50,33 @@ func humanDuration(d time.Duration) string {
 }
 
 func printTasks(tasks []api.Task) error {
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].Created.After(tasks[j].Created)
+	})
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	defer func() { _ = w.Flush() }()
 
-	_, _ = fmt.Fprintln(w, "UUID\tSTATUS\tAGE\tTYPE")
+	_, _ = fmt.Fprintln(w, "UUID\tSTATUS\tAGE\tTYPE\tARGS")
 
 	for _, task := range tasks {
+		args := task.Args()
+
+		argParts := make([]string, 0, len(args))
+		for k, v := range args {
+			argParts = append(argParts, fmt.Sprintf("%s=%s", k, v))
+		}
+
+		sort.Strings(argParts)
+
 		_, _ = fmt.Fprintf(
 			w,
-			"%s\t%s\t%s\t%s\n",
+			"%s\t%s\t%s\t%s\t%s\n",
 			task.UUID,
 			task.Status,
 			humanDuration(time.Since(task.Created)),
 			task.Type(),
+			strings.Join(argParts, ", "),
 		)
 	}
 

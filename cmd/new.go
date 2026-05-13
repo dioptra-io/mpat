@@ -50,7 +50,7 @@ func init() {
 	rootCmd.AddCommand(newCmd)
 	newCmd.AddCommand(newRetinaStreamCmd)
 
-	newRetinaStreamCmd.Flags().StringVar(&retinaStreamEndpoint, "endpoint", "https://iprl.dioptra.io/api/v1/stream", "Retina endpoint to measure")
+	newRetinaStreamCmd.Flags().StringVar(&retinaStreamEndpoint, "endpoint", api.DefaultRetinaStreamEndpoint, "Retina endpoint to measure")
 	newRetinaStreamCmd.Flags().DurationVar(&retinaStreamDuration, "duration", time.Second*10, "measurement duration")
 }
 

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 
 	"github.com/dioptra-io/ufuk-research/internal/api"
+	"github.com/dioptra-io/ufuk-research/internal/mpat/workers"
 
 	"golang.org/x/sync/errgroup"
 
@@ -251,7 +252,7 @@ func (w *MPATServer) processTask(ctx context.Context, workerID int, taskUUID str
 		return
 	}
 
-	if err := handleRetinaStreaming(taskCtx, &task, workerID); err != nil {
+	if err := workers.InvokeWorker(taskCtx, &task, workerID, w.logger); err != nil {
 		if errors.Is(ErrTaskCancelled, err) {
 			if err := w.store.UpdateTaskStatus(ctx, taskUUID, api.TaskStatusCancelled); err != nil {
 				w.logger.Error("failed to mark task as cancelled", "task_uuid", taskUUID, "error", err)

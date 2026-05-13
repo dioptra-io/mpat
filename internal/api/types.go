@@ -1,6 +1,11 @@
 package api
 
-import "time"
+import (
+	"fmt"
+	"time"
+
+	retina "github.com/dioptra-io/retina-commons/api/v1"
+)
 
 type TaskStatus string
 
@@ -14,6 +19,13 @@ const (
 	TaskStatusCancelled TaskStatus = "cancelled"
 )
 
+type TaskType string
+
+const (
+	TaskTypeUnknown      TaskType = "unkwnown"
+	TaskTypeRetinaStream TaskType = "retina_stream"
+)
+
 type Task struct {
 	UUID    string     `json:"uuid"`
 	Status  TaskStatus `json:"status"`
@@ -23,11 +35,34 @@ type Task struct {
 	RetinaStream *RetinaStreamTaskRequest `json:"retina_stream,omitempty"`
 }
 
-func (t *Task) Type() string {
+func (t *Task) Type() TaskType {
 	if t.RetinaStream != nil {
-		return "Retina Stream"
+		return TaskTypeRetinaStream
 	}
-	return "unkwnown"
+	return TaskTypeUnknown
+}
+
+func (t *Task) Args() map[string]string {
+	switch t.Type() {
+	case TaskTypeRetinaStream:
+		if t.RetinaStream == nil {
+			return map[string]string{}
+		}
+
+		args := map[string]string{
+			"duration": fmt.Sprintf("%ds", t.RetinaStream.DurationSeconds),
+			"output":   t.RetinaStream.OutputFile,
+		}
+
+		if t.RetinaStream.Endpoint != DefaultRetinaStreamEndpoint {
+			args["endpoint"] = t.RetinaStream.Endpoint
+		}
+
+		return args
+
+	default:
+		return map[string]string{}
+	}
 }
 
 type RetinaStreamTaskRequest struct {
@@ -52,4 +87,10 @@ type CreateTaskRequest struct {
 
 type CreateTaskResponse struct {
 	TaskUUID string `json:"task_uuid"`
+}
+
+// SequencedFIE is a ForwardingInfoElement with a sequence number for ordered delivery to HTTP clients.
+type SequencedFIE struct {
+	retina.ForwardingInfoElement
+	SequenceNumber uint64 `json:"sequence_number"`
 }
