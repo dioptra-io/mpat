@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"encoding/json"
@@ -47,6 +48,9 @@ type Worker struct {
 	store      store.WorkerStore
 	logger     *slog.Logger
 	numWorkers int
+
+	taskCancelMu sync.Mutex
+	taskCancelCh map[string]chan struct{}
 }
 
 func NewWorkerFromConfig(cfg WorkerConfig, workerStore store.WorkerStore, logger *slog.Logger) (*Worker, error) {
@@ -63,10 +67,11 @@ func NewWorkerFromConfig(cfg WorkerConfig, workerStore store.WorkerStore, logger
 	}
 
 	w := &Worker{
-		queue:      make(chan string, cfg.QueueSize),
-		store:      workerStore,
-		logger:     logger,
-		numWorkers: cfg.NumWorkers,
+		queue:        make(chan string, cfg.QueueSize),
+		store:        workerStore,
+		logger:       logger,
+		numWorkers:   cfg.NumWorkers,
+		taskCancelCh: make(map[string]chan struct{}),
 	}
 
 	mux := http.NewServeMux()
@@ -96,6 +101,10 @@ func NewWorkerFromConfig(cfg WorkerConfig, workerStore store.WorkerStore, logger
 
 func (w *Worker) Run(ctx context.Context) error {
 	g, ctx := errgroup.WithContext(ctx)
+
+	if err := w.recoverUnterminatedTasks(ctx); err != nil {
+		return err
+	}
 
 	for i := 0; i < w.numWorkers; i++ {
 		i := i
@@ -134,6 +143,58 @@ func (w *Worker) Run(ctx context.Context) error {
 	return g.Wait()
 }
 
+func (w *Worker) recoverUnterminatedTasks(ctx context.Context) error {
+	w.logger.Info("recovering unterminated tasks")
+
+	tasks, err := w.store.ListTasksByStatus(
+		ctx,
+		api.TaskStatusQueued,
+		api.TaskStatusRunning,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to list unterminated tasks: %w", err)
+	}
+
+	for _, task := range tasks {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		switch api.TaskStatus(task.Status) {
+		case api.TaskStatusRunning:
+			w.logger.Warn(
+				"marking interrupted running task as failed",
+				"task_uuid", task.UUID,
+			)
+
+			if err := w.store.UpdateTaskStatus(ctx, task.UUID, api.TaskStatusFailed); err != nil {
+				return fmt.Errorf("failed to mark running task as failed (%s): %w", task.UUID, err)
+			}
+
+		case api.TaskStatusQueued:
+			w.logger.Info(
+				"re-queueing queued task",
+				"task_uuid", task.UUID,
+			)
+
+			select {
+			case w.queue <- task.UUID:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+
+	w.logger.Info(
+		"unterminated task recovery complete",
+		"recovered_tasks", len(tasks),
+	)
+
+	return nil
+}
+
 func (w *Worker) runWorker(ctx context.Context, id int) {
 	w.logger.Info("worker started", "worker_id", id)
 
@@ -144,12 +205,22 @@ func (w *Worker) runWorker(ctx context.Context, id int) {
 			return
 
 		case taskUUID := <-w.queue:
-			w.processTask(ctx, id, taskUUID)
+			taskCancelCh := make(chan struct{})
+
+			w.taskCancelMu.Lock()
+			w.taskCancelCh[taskUUID] = taskCancelCh
+			w.taskCancelMu.Unlock()
+
+			w.processTask(ctx, id, taskUUID, taskCancelCh)
+
+			w.taskCancelMu.Lock()
+			delete(w.taskCancelCh, taskUUID)
+			w.taskCancelMu.Unlock()
 		}
 	}
 }
 
-func (w *Worker) processTask(ctx context.Context, workerID int, taskUUID string) {
+func (w *Worker) processTask(ctx context.Context, workerID int, taskUUID string, taskCancelCh <-chan struct{}) {
 	w.logger.Info(
 		"processing task",
 		"worker_id", workerID,
@@ -159,6 +230,22 @@ func (w *Worker) processTask(ctx context.Context, workerID int, taskUUID string)
 	if err := w.store.UpdateTaskStatus(ctx, taskUUID, api.TaskStatusRunning); err != nil {
 		w.logger.Error("failed to mark task as running", "task_uuid", taskUUID, "error", err)
 		return
+	}
+
+	select {
+	case <-ctx.Done():
+		if err := w.store.UpdateTaskStatus(context.Background(), taskUUID, api.TaskStatusCancelled); err != nil {
+			w.logger.Error("failed to mark task as cancelled", "task_uuid", taskUUID, "error", err)
+		}
+		return
+
+	case <-taskCancelCh:
+		if err := w.store.UpdateTaskStatus(context.Background(), taskUUID, api.TaskStatusCancelled); err != nil {
+			w.logger.Error("failed to mark task as cancelled", "task_uuid", taskUUID, "error", err)
+		}
+		return
+
+	default:
 	}
 
 	// TODO: execute actual backend command here.
@@ -189,7 +276,7 @@ func (w *Worker) handleGetHealthz(rw http.ResponseWriter, r *http.Request) {
 // @Tags         tasks
 // @Accept       json
 // @Produce      json
-// @Param        request  body      api.CreateTaskRequest   true  "Task creation request"
+// @Param        request  body      api.CreateTaskRequest  true  "Task creation request"
 // @Success      202      {object}  api.CreateTaskResponse
 // @Failure      400      {object}  api.ErrorResponse
 // @Failure      503      {object}  api.ErrorResponse
@@ -203,8 +290,8 @@ func (w *Worker) handlePostTasks(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Platform == "" {
-		writeError(rw, http.StatusBadRequest, "platform is required")
+	if req.Get == nil {
+		writeError(rw, http.StatusBadRequest, "get_task is required")
 		return
 	}
 
@@ -219,7 +306,6 @@ func (w *Worker) handlePostTasks(rw http.ResponseWriter, r *http.Request) {
 	case w.queue <- task.UUID:
 		writeJSON(rw, http.StatusAccepted, api.CreateTaskResponse{
 			TaskUUID: task.UUID,
-			Status:   string(api.TaskStatusQueued),
 		})
 	default:
 		if err := w.store.UpdateTaskStatus(r.Context(), task.UUID, api.TaskStatusFailed); err != nil {
@@ -236,7 +322,7 @@ func (w *Worker) handlePostTasks(rw http.ResponseWriter, r *http.Request) {
 // @Description  Returns all known tasks.
 // @Tags         tasks
 // @Produce      json
-// @Success      200  {array}   api.TaskResponse
+// @Success      200  {array}   api.Task
 // @Failure      500  {object}  api.ErrorResponse
 // @Router       /tasks [get]
 func (w *Worker) handleGetTasks(rw http.ResponseWriter, r *http.Request) {
@@ -257,7 +343,8 @@ func (w *Worker) handleGetTasks(rw http.ResponseWriter, r *http.Request) {
 // @Tags         tasks
 // @Produce      json
 // @Param        task_uuid  path      string  true  "Task UUID"
-// @Success      200        {object}  api.TaskResponse
+// @Success      200        {object}  api.Task
+// @Failure      400        {object}  api.ErrorResponse
 // @Failure      404        {object}  api.ErrorResponse
 // @Failure      500        {object}  api.ErrorResponse
 // @Router       /tasks/{task_uuid} [get]
@@ -285,11 +372,12 @@ func (w *Worker) handleGetTask(rw http.ResponseWriter, r *http.Request) {
 // handlePostCancelTask godoc
 //
 // @Summary      Cancel task
-// @Description  Cancels or dequeues a task by UUID.
+// @Description  Cancels a running task by UUID.
 // @Tags         tasks
 // @Produce      json
 // @Param        task_uuid  path      string  true  "Task UUID"
-// @Success      200        {object}  api.TaskResponse
+// @Success      200        {object}  api.CreateTaskResponse
+// @Failure      400        {object}  api.ErrorResponse
 // @Failure      404        {object}  api.ErrorResponse
 // @Failure      500        {object}  api.ErrorResponse
 // @Router       /tasks/{task_uuid}/cancel [post]
@@ -300,18 +388,39 @@ func (w *Worker) handlePostCancelTask(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := w.store.CancelTask(r.Context(), taskUUID)
-	if errors.Is(err, store.ErrTaskNotFound) {
-		writeError(rw, http.StatusNotFound, "task not found")
-		return
+	w.taskCancelMu.Lock()
+	taskCancelCh, ok := w.taskCancelCh[taskUUID]
+	if ok {
+		delete(w.taskCancelCh, taskUUID)
 	}
-	if err != nil {
-		w.logger.Error("failed to cancel task", "task_uuid", taskUUID, "error", err)
-		writeError(rw, http.StatusInternalServerError, "failed to cancel task")
+	w.taskCancelMu.Unlock()
+
+	if !ok {
+		task, err := w.store.CancelTask(r.Context(), taskUUID)
+		if errors.Is(err, store.ErrTaskNotFound) {
+			writeError(rw, http.StatusNotFound, "task not found")
+			return
+		}
+		if err != nil {
+			w.logger.Error("failed to cancel task", "task_uuid", taskUUID, "error", err)
+			writeError(rw, http.StatusInternalServerError, "failed to cancel task")
+			return
+		}
+
+		writeJSON(rw, http.StatusOK, api.CreateTaskResponse{
+			TaskUUID: task.UUID,
+		})
 		return
 	}
 
-	writeJSON(rw, http.StatusOK, task)
+	select {
+	case taskCancelCh <- struct{}{}:
+	default:
+	}
+
+	writeJSON(rw, http.StatusOK, api.CreateTaskResponse{
+		TaskUUID: taskUUID,
+	})
 }
 
 // handleGetQueue godoc
@@ -320,7 +429,7 @@ func (w *Worker) handlePostCancelTask(rw http.ResponseWriter, r *http.Request) {
 // @Description  Returns tasks that are queued or currently running.
 // @Tags         tasks
 // @Produce      json
-// @Success      200  {array}   api.TaskResponse
+// @Success      200  {array}   api.Task
 // @Failure      500  {object}  api.ErrorResponse
 // @Router       /queue [get]
 func (w *Worker) handleGetQueue(rw http.ResponseWriter, r *http.Request) {
@@ -344,7 +453,7 @@ func (w *Worker) handleGetQueue(rw http.ResponseWriter, r *http.Request) {
 // @Description  Returns tasks that completed successfully.
 // @Tags         tasks
 // @Produce      json
-// @Success      200  {array}   api.TaskResponse
+// @Success      200  {array}   api.Task
 // @Failure      500  {object}  api.ErrorResponse
 // @Router       /done [get]
 func (w *Worker) handleGetDone(rw http.ResponseWriter, r *http.Request) {

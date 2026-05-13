@@ -31,7 +31,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/api.TaskResponse"
+                                "$ref": "#/definitions/api.Task"
                             }
                         }
                     },
@@ -80,7 +80,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/api.TaskResponse"
+                                "$ref": "#/definitions/api.Task"
                             }
                         }
                     },
@@ -109,7 +109,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/api.TaskResponse"
+                                "$ref": "#/definitions/api.Task"
                             }
                         }
                     },
@@ -195,7 +195,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.TaskResponse"
+                            "$ref": "#/definitions/api.Task"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
                         }
                     },
                     "404": {
@@ -215,7 +221,7 @@ const docTemplate = `{
         },
         "/tasks/{task_uuid}/cancel": {
             "post": {
-                "description": "Cancels or dequeues a task by UUID.",
+                "description": "Cancels a running task by UUID.",
                 "produces": [
                     "application/json"
                 ],
@@ -236,7 +242,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/api.TaskResponse"
+                            "$ref": "#/definitions/api.CreateTaskResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
                         }
                     },
                     "404": {
@@ -256,24 +268,25 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "api.Artifact": {
+            "type": "object"
+        },
         "api.CreateTaskRequest": {
             "type": "object",
             "properties": {
-                "get_command": {
-                    "$ref": "#/definitions/api.GetCommand"
-                },
-                "platform": {
-                    "type": "string",
-                    "example": "retina"
+                "get": {
+                    "description": "One of Get",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/api.GetTask"
+                        }
+                    ]
                 }
             }
         },
         "api.CreateTaskResponse": {
             "type": "object",
             "properties": {
-                "status": {
-                    "type": "string"
-                },
                 "task_uuid": {
                     "type": "string"
                 }
@@ -287,25 +300,77 @@ const docTemplate = `{
                 }
             }
         },
-        "api.GetCommand": {
+        "api.GetArkTask": {
             "type": "object",
             "properties": {
-                "platform": {
-                    "description": "iris, retina",
+                "endpoint": {
                     "type": "string"
                 }
             }
         },
-        "api.TaskResponse": {
+        "api.GetIrisTask": {
             "type": "object",
             "properties": {
-                "creation_request": {
-                    "$ref": "#/definitions/api.CreateTaskRequest"
+                "endpoint": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.GetRetinaTask": {
+            "type": "object",
+            "properties": {
+                "duration_seconds": {
+                    "type": "integer",
+                    "example": 60
+                },
+                "endpoint": {
+                    "type": "string"
+                },
+                "live": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "api.GetTask": {
+            "type": "object",
+            "properties": {
+                "ark": {
+                    "$ref": "#/definitions/api.GetArkTask"
+                },
+                "iris": {
+                    "$ref": "#/definitions/api.GetIrisTask"
+                },
+                "retina": {
+                    "description": "One of Retina, GetIrisTask, GetArkTask",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/api.GetRetinaTask"
+                        }
+                    ]
+                }
+            }
+        },
+        "api.Task": {
+            "type": "object",
+            "properties": {
+                "artifacts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.Artifact"
+                    }
+                },
+                "get": {
+                    "description": "One of Get",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/api.GetTask"
+                        }
+                    ]
                 },
                 "status": {
                     "type": "string"
                 },
-                "task_uuid": {
+                "uuid": {
                     "type": "string"
                 }
             }

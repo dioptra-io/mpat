@@ -10,12 +10,12 @@ import (
 
 type InMemoryWorkerStore struct {
 	mu    sync.RWMutex
-	tasks map[string]api.TaskResponse
+	tasks map[string]api.Task
 }
 
 func NewInMemoryWorkerStore() *InMemoryWorkerStore {
 	return &InMemoryWorkerStore{
-		tasks: make(map[string]api.TaskResponse),
+		tasks: make(map[string]api.Task),
 	}
 }
 
@@ -25,10 +25,12 @@ func (s *InMemoryWorkerStore) CreateTask(ctx context.Context, req api.CreateTask
 	}
 
 	taskUUID := uuid.NewString()
-	task := api.TaskResponse{
-		TaskUUID:        taskUUID,
-		CreationRequest: req,
-		Status:          string(api.TaskStatusQueued),
+
+	task := api.Task{
+		UUID:      taskUUID,
+		Status:    string(api.TaskStatusQueued),
+		Artifacts: []api.Artifact{},
+		Get:       req.Get,
 	}
 
 	s.mu.Lock()
@@ -36,14 +38,12 @@ func (s *InMemoryWorkerStore) CreateTask(ctx context.Context, req api.CreateTask
 
 	s.tasks[taskUUID] = task
 
-	return api.Task{
-		UUID: taskUUID,
-	}, nil
+	return task, nil
 }
 
-func (s *InMemoryWorkerStore) GetTask(ctx context.Context, taskUUID string) (api.TaskResponse, error) {
+func (s *InMemoryWorkerStore) GetTask(ctx context.Context, taskUUID string) (api.Task, error) {
 	if err := ctx.Err(); err != nil {
-		return api.TaskResponse{}, err
+		return api.Task{}, err
 	}
 
 	s.mu.RLock()
@@ -51,13 +51,13 @@ func (s *InMemoryWorkerStore) GetTask(ctx context.Context, taskUUID string) (api
 
 	task, ok := s.tasks[taskUUID]
 	if !ok {
-		return api.TaskResponse{}, ErrTaskNotFound
+		return api.Task{}, ErrTaskNotFound
 	}
 
 	return task, nil
 }
 
-func (s *InMemoryWorkerStore) ListTasks(ctx context.Context) ([]api.TaskResponse, error) {
+func (s *InMemoryWorkerStore) ListTasks(ctx context.Context) ([]api.Task, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (s *InMemoryWorkerStore) ListTasks(ctx context.Context) ([]api.TaskResponse
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	tasks := make([]api.TaskResponse, 0, len(s.tasks))
+	tasks := make([]api.Task, 0, len(s.tasks))
 	for _, task := range s.tasks {
 		tasks = append(tasks, task)
 	}
@@ -73,7 +73,7 @@ func (s *InMemoryWorkerStore) ListTasks(ctx context.Context) ([]api.TaskResponse
 	return tasks, nil
 }
 
-func (s *InMemoryWorkerStore) ListTasksByStatus(ctx context.Context, statuses ...api.TaskStatus) ([]api.TaskResponse, error) {
+func (s *InMemoryWorkerStore) ListTasksByStatus(ctx context.Context, statuses ...api.TaskStatus) ([]api.Task, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -86,7 +86,7 @@ func (s *InMemoryWorkerStore) ListTasksByStatus(ctx context.Context, statuses ..
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	tasks := make([]api.TaskResponse, 0)
+	tasks := make([]api.Task, 0)
 
 	for _, task := range s.tasks {
 		if _, ok := statusSet[task.Status]; ok {
@@ -116,9 +116,9 @@ func (s *InMemoryWorkerStore) UpdateTaskStatus(ctx context.Context, taskUUID str
 	return nil
 }
 
-func (s *InMemoryWorkerStore) CancelTask(ctx context.Context, taskUUID string) (api.TaskResponse, error) {
+func (s *InMemoryWorkerStore) CancelTask(ctx context.Context, taskUUID string) (api.Task, error) {
 	if err := ctx.Err(); err != nil {
-		return api.TaskResponse{}, err
+		return api.Task{}, err
 	}
 
 	s.mu.Lock()
@@ -126,7 +126,7 @@ func (s *InMemoryWorkerStore) CancelTask(ctx context.Context, taskUUID string) (
 
 	task, ok := s.tasks[taskUUID]
 	if !ok {
-		return api.TaskResponse{}, ErrTaskNotFound
+		return api.Task{}, ErrTaskNotFound
 	}
 
 	task.Status = string(api.TaskStatusCancelled)
