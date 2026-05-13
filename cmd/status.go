@@ -11,9 +11,13 @@ import (
 )
 
 func newStatusCmd(name, status string) *cobra.Command {
+	shortName := "List " + status + " tasks"
+	if status == "" {
+		shortName = "List all tasks"
+	}
 	return &cobra.Command{
 		Use:   name,
-		Short: "List " + status + " tasks",
+		Short: shortName,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := client.NewClient(addr)
 
