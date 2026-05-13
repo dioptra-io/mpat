@@ -1,0 +1,377 @@
+package worker
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"encoding/json"
+
+	"github.com/dioptra-io/ufuk-research/internal/api"
+	"github.com/dioptra-io/ufuk-research/internal/store"
+
+	"golang.org/x/sync/errgroup"
+
+	_ "github.com/dioptra-io/ufuk-research/docs"
+	httpSwagger "github.com/swaggo/http-swagger/v2"
+)
+
+type WorkerConfig struct {
+	Addr       string
+	QueueSize  int
+	NumWorkers int
+}
+
+func (cfg *WorkerConfig) validate() error {
+	if cfg.Addr == "" {
+		cfg.Addr = "localhost:9293"
+	}
+
+	if cfg.QueueSize <= 0 {
+		cfg.QueueSize = 1024
+	}
+
+	if cfg.NumWorkers <= 0 {
+		cfg.NumWorkers = 1
+	}
+
+	return nil
+}
+
+type Worker struct {
+	queue      chan string
+	server     *http.Server
+	store      store.WorkerStore
+	logger     *slog.Logger
+	numWorkers int
+}
+
+func NewWorkerFromConfig(cfg WorkerConfig, workerStore store.WorkerStore, logger *slog.Logger) (*Worker, error) {
+	if err := cfg.validate(); err != nil {
+		return nil, fmt.Errorf("worker config cannot be validated: %w", err)
+	}
+
+	if workerStore == nil {
+		return nil, fmt.Errorf("worker store cannot be nil")
+	}
+
+	if logger == nil {
+		return nil, fmt.Errorf("logger cannot be nil")
+	}
+
+	w := &Worker{
+		queue:      make(chan string, cfg.QueueSize),
+		store:      workerStore,
+		logger:     logger,
+		numWorkers: cfg.NumWorkers,
+	}
+
+	mux := http.NewServeMux()
+
+	// health
+	mux.HandleFunc("GET /healthz", w.handleGetHealthz)
+	// tasks
+	mux.HandleFunc("POST /tasks", w.handlePostTasks)
+	mux.HandleFunc("GET /tasks", w.handleGetTasks)
+	mux.HandleFunc("GET /tasks/{task_uuid}", w.handleGetTask)
+	mux.HandleFunc("POST /tasks/{task_uuid}/cancel", w.handlePostCancelTask)
+	// queue
+	mux.HandleFunc("GET /queue", w.handleGetQueue)
+	// completed tasks
+	mux.HandleFunc("GET /done", w.handleGetDone)
+	// swagger
+	mux.Handle("/swagger/", httpSwagger.WrapHandler)
+
+	w.server = &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	return w, nil
+}
+
+func (w *Worker) Run(ctx context.Context) error {
+	g, ctx := errgroup.WithContext(ctx)
+
+	for i := 0; i < w.numWorkers; i++ {
+		i := i
+		g.Go(func() error {
+			w.runWorker(ctx, i)
+			return nil
+		})
+	}
+
+	g.Go(func() error {
+		w.logger.Info("starting worker http server", "addr", w.server.Addr)
+
+		err := w.server.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+
+		return nil
+	})
+
+	g.Go(func() error {
+		<-ctx.Done()
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		w.logger.Info("shutting down worker http server")
+
+		if err := w.server.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+
+		return ctx.Err()
+	})
+
+	return g.Wait()
+}
+
+func (w *Worker) runWorker(ctx context.Context, id int) {
+	w.logger.Info("worker started", "worker_id", id)
+
+	for {
+		select {
+		case <-ctx.Done():
+			w.logger.Info("worker stopped", "worker_id", id)
+			return
+
+		case taskUUID := <-w.queue:
+			w.processTask(ctx, id, taskUUID)
+		}
+	}
+}
+
+func (w *Worker) processTask(ctx context.Context, workerID int, taskUUID string) {
+	w.logger.Info(
+		"processing task",
+		"worker_id", workerID,
+		"task_uuid", taskUUID,
+	)
+
+	if err := w.store.UpdateTaskStatus(ctx, taskUUID, api.TaskStatusRunning); err != nil {
+		w.logger.Error("failed to mark task as running", "task_uuid", taskUUID, "error", err)
+		return
+	}
+
+	// TODO: execute actual backend command here.
+
+	if err := w.store.UpdateTaskStatus(ctx, taskUUID, api.TaskStatusDone); err != nil {
+		w.logger.Error("failed to mark task as done", "task_uuid", taskUUID, "error", err)
+		return
+	}
+}
+
+// handleGetHealthz godoc
+//
+// @Summary      Health check
+// @Description  Returns ok if the MPAT worker server is alive.
+// @Tags         health
+// @Produce      plain
+// @Success      200  {string}  string  "ok"
+// @Router       /healthz [get]
+func (w *Worker) handleGetHealthz(rw http.ResponseWriter, r *http.Request) {
+	rw.WriteHeader(http.StatusOK)
+	_, _ = rw.Write([]byte("ok\n"))
+}
+
+// handlePostTasks godoc
+//
+// @Summary      Create task
+// @Description  Creates a new task, stores it, and enqueues it for execution.
+// @Tags         tasks
+// @Accept       json
+// @Produce      json
+// @Param        request  body      api.CreateTaskRequest   true  "Task creation request"
+// @Success      202      {object}  api.CreateTaskResponse
+// @Failure      400      {object}  api.ErrorResponse
+// @Failure      503      {object}  api.ErrorResponse
+// @Failure      500      {object}  api.ErrorResponse
+// @Router       /tasks [post]
+func (w *Worker) handlePostTasks(rw http.ResponseWriter, r *http.Request) {
+	var req api.CreateTaskRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(rw, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	if req.Platform == "" {
+		writeError(rw, http.StatusBadRequest, "platform is required")
+		return
+	}
+
+	task, err := w.store.CreateTask(r.Context(), req)
+	if err != nil {
+		w.logger.Error("failed to create task", "error", err)
+		writeError(rw, http.StatusInternalServerError, "failed to create task")
+		return
+	}
+
+	select {
+	case w.queue <- task.UUID:
+		writeJSON(rw, http.StatusAccepted, api.CreateTaskResponse{
+			TaskUUID: task.UUID,
+			Status:   string(api.TaskStatusQueued),
+		})
+	default:
+		if err := w.store.UpdateTaskStatus(r.Context(), task.UUID, api.TaskStatusFailed); err != nil {
+			w.logger.Error("failed to mark task as failed after queue overflow", "task_uuid", task.UUID, "error", err)
+		}
+
+		writeError(rw, http.StatusServiceUnavailable, "task queue is full")
+	}
+}
+
+// handleGetTasks godoc
+//
+// @Summary      List tasks
+// @Description  Returns all known tasks.
+// @Tags         tasks
+// @Produce      json
+// @Success      200  {array}   api.TaskResponse
+// @Failure      500  {object}  api.ErrorResponse
+// @Router       /tasks [get]
+func (w *Worker) handleGetTasks(rw http.ResponseWriter, r *http.Request) {
+	tasks, err := w.store.ListTasks(r.Context())
+	if err != nil {
+		w.logger.Error("failed to list tasks", "error", err)
+		writeError(rw, http.StatusInternalServerError, "failed to list tasks")
+		return
+	}
+
+	writeJSON(rw, http.StatusOK, tasks)
+}
+
+// handleGetTask godoc
+//
+// @Summary      Get task
+// @Description  Returns a task by UUID.
+// @Tags         tasks
+// @Produce      json
+// @Param        task_uuid  path      string  true  "Task UUID"
+// @Success      200        {object}  api.TaskResponse
+// @Failure      404        {object}  api.ErrorResponse
+// @Failure      500        {object}  api.ErrorResponse
+// @Router       /tasks/{task_uuid} [get]
+func (w *Worker) handleGetTask(rw http.ResponseWriter, r *http.Request) {
+	taskUUID := r.PathValue("task_uuid")
+	if taskUUID == "" {
+		writeError(rw, http.StatusBadRequest, "task uuid is required")
+		return
+	}
+
+	task, err := w.store.GetTask(r.Context(), taskUUID)
+	if errors.Is(err, store.ErrTaskNotFound) {
+		writeError(rw, http.StatusNotFound, "task not found")
+		return
+	}
+	if err != nil {
+		w.logger.Error("failed to get task", "task_uuid", taskUUID, "error", err)
+		writeError(rw, http.StatusInternalServerError, "failed to get task")
+		return
+	}
+
+	writeJSON(rw, http.StatusOK, task)
+}
+
+// handlePostCancelTask godoc
+//
+// @Summary      Cancel task
+// @Description  Cancels or dequeues a task by UUID.
+// @Tags         tasks
+// @Produce      json
+// @Param        task_uuid  path      string  true  "Task UUID"
+// @Success      200        {object}  api.TaskResponse
+// @Failure      404        {object}  api.ErrorResponse
+// @Failure      500        {object}  api.ErrorResponse
+// @Router       /tasks/{task_uuid}/cancel [post]
+func (w *Worker) handlePostCancelTask(rw http.ResponseWriter, r *http.Request) {
+	taskUUID := r.PathValue("task_uuid")
+	if taskUUID == "" {
+		writeError(rw, http.StatusBadRequest, "task uuid is required")
+		return
+	}
+
+	task, err := w.store.CancelTask(r.Context(), taskUUID)
+	if errors.Is(err, store.ErrTaskNotFound) {
+		writeError(rw, http.StatusNotFound, "task not found")
+		return
+	}
+	if err != nil {
+		w.logger.Error("failed to cancel task", "task_uuid", taskUUID, "error", err)
+		writeError(rw, http.StatusInternalServerError, "failed to cancel task")
+		return
+	}
+
+	writeJSON(rw, http.StatusOK, task)
+}
+
+// handleGetQueue godoc
+//
+// @Summary      List queued and running tasks
+// @Description  Returns tasks that are queued or currently running.
+// @Tags         tasks
+// @Produce      json
+// @Success      200  {array}   api.TaskResponse
+// @Failure      500  {object}  api.ErrorResponse
+// @Router       /queue [get]
+func (w *Worker) handleGetQueue(rw http.ResponseWriter, r *http.Request) {
+	tasks, err := w.store.ListTasksByStatus(
+		r.Context(),
+		api.TaskStatusQueued,
+		api.TaskStatusRunning,
+	)
+	if err != nil {
+		w.logger.Error("failed to list queued/running tasks", "error", err)
+		writeError(rw, http.StatusInternalServerError, "failed to list queued/running tasks")
+		return
+	}
+
+	writeJSON(rw, http.StatusOK, tasks)
+}
+
+// handleGetDone godoc
+//
+// @Summary      List completed tasks
+// @Description  Returns tasks that completed successfully.
+// @Tags         tasks
+// @Produce      json
+// @Success      200  {array}   api.TaskResponse
+// @Failure      500  {object}  api.ErrorResponse
+// @Router       /done [get]
+func (w *Worker) handleGetDone(rw http.ResponseWriter, r *http.Request) {
+	tasks, err := w.store.ListTasksByStatus(
+		r.Context(),
+		api.TaskStatusDone,
+	)
+	if err != nil {
+		w.logger.Error("failed to list completed tasks", "error", err)
+		writeError(rw, http.StatusInternalServerError, "failed to list completed tasks")
+		return
+	}
+
+	writeJSON(rw, http.StatusOK, tasks)
+}
+
+func writeJSON(rw http.ResponseWriter, status int, value any) {
+	rw.Header().Set("Content-Type", "application/json")
+	rw.WriteHeader(status)
+
+	if err := json.NewEncoder(rw).Encode(value); err != nil {
+		slog.Error("failed to encode json response", "error", err)
+	}
+}
+
+func writeError(rw http.ResponseWriter, status int, message string) {
+	writeJSON(rw, status, api.ErrorResponse{
+		Error: message,
+	})
+}

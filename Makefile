@@ -7,6 +7,7 @@ GOTEST := go test
 GOBUILD := go build
 GORUN := go run
 GOMOD := go mod
+SWAG := swag
 
 GOBIN ?= $(shell go env GOBIN)
 GOPATH_BIN := $(shell go env GOPATH)/bin
@@ -69,23 +70,28 @@ test: ## execution Run tests
 	$(GOTEST) ./...
 
 .PHONY: build
-build: fmt vet lint ## execution Run checks and build the MPAT binary
+build: fmt vet lint swag ## execution Run checks and build the MPAT binary
 	@mkdir -p $(BUILD_DIR)
 	$(GOBUILD) -o $(BUILD_DIR)/$(APP_NAME) .
 
 .PHONY: install
-install: build ## execution Build and install binary as mp
+install: build swag ## execution Build and install binary as mp
 	@mkdir -p $(GOBIN)
 	cp $(BUILD_DIR)/$(APP_NAME) $(GOBIN)/mp
 	@echo "Installed to $(GOBIN)/mp"
+	@echo Please run "source <(mp completion zsh)" for enabling completions.
 
 .PHONY: run
-run: ## execution Run the application
+run: fmt vet lint swag ## execution Run the application
 	$(GORUN) .
 
 .PHONY: serve
-serve: ## execution Run the MPAT server
+serve: fmt vet lint swag ## execution Run the MPAT server
 	$(GORUN) . serve
+
+.PHONY: swag
+swag: vet lint ## make Generate the swago spec
+	$(SWAG) init
 
 .PHONY: deps
 deps: ## make Download dependencies

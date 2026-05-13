@@ -1,39 +1,75 @@
-/*
-Copyright © 2026 NAME HERE <EMAIL ADDRESS>
-*/
 package cmd
 
 import (
-	"fmt"
+	"context"
+	"log/slog"
+	"os/signal"
+	"syscall"
 
+	"github.com/dioptra-io/ufuk-research/internal/store"
+	"github.com/dioptra-io/ufuk-research/internal/worker"
 	"github.com/spf13/cobra"
+)
+
+var (
+	serveAddr  string
+	numWorkers int
 )
 
 // serveCmd represents the serve command
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
+	Short: "Start the MPAT worker server",
+	Long: `Start the MPAT worker runtime and HTTP API server.
 
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("serve called")
+The server accepts incoming tasks, queues them,
+and processes them asynchronously using worker goroutines.`,
+
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx, cancel := signal.NotifyContext(
+			context.Background(),
+			syscall.SIGINT,
+			syscall.SIGTERM,
+		)
+		defer cancel()
+
+		// TODO:
+		// Replace with real implementation later.
+		var workerStore store.WorkerStore
+
+		w, err := worker.NewWorkerFromConfig(worker.WorkerConfig{
+			Addr:       serveAddr,
+			NumWorkers: numWorkers,
+			QueueSize:  1024,
+		}, workerStore, logger)
+		if err != nil {
+			return err
+		}
+
+		slog.Info(
+			"worker initialized",
+			"addr", serveAddr,
+			"num_workers", numWorkers,
+		)
+
+		return w.Run(ctx)
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(serveCmd)
 
-	// Here you will define your flags and configuration settings.
+	serveCmd.Flags().StringVar(
+		&serveAddr,
+		"addr",
+		"localhost:9293",
+		"http listen address",
+	)
 
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// serveCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// serveCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	serveCmd.Flags().IntVar(
+		&numWorkers,
+		"num-workers",
+		1,
+		"number of concurrent workers",
+	)
 }

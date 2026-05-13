@@ -1,0 +1,197 @@
+definitions:
+  api.CreateTaskRequest:
+    properties:
+      get_command:
+        $ref: '#/definitions/api.GetCommand'
+      platform:
+        example: retina
+        type: string
+    type: object
+  api.CreateTaskResponse:
+    properties:
+      status:
+        type: string
+      task_uuid:
+        type: string
+    type: object
+  api.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  api.GetCommand:
+    properties:
+      platform:
+        description: iris, retina
+        type: string
+    type: object
+  api.TaskResponse:
+    properties:
+      creation_request:
+        $ref: '#/definitions/api.CreateTaskRequest'
+      status:
+        type: string
+      task_uuid:
+        type: string
+    type: object
+info:
+  contact: {}
+paths:
+  /done:
+    get:
+      description: Returns tasks that completed successfully.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.TaskResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: List completed tasks
+      tags:
+      - tasks
+  /healthz:
+    get:
+      description: Returns ok if the MPAT worker server is alive.
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: ok
+          schema:
+            type: string
+      summary: Health check
+      tags:
+      - health
+  /queue:
+    get:
+      description: Returns tasks that are queued or currently running.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.TaskResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: List queued and running tasks
+      tags:
+      - tasks
+  /tasks:
+    get:
+      description: Returns all known tasks.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.TaskResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: List tasks
+      tags:
+      - tasks
+    post:
+      consumes:
+      - application/json
+      description: Creates a new task, stores it, and enqueues it for execution.
+      parameters:
+      - description: Task creation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.CreateTaskRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/api.CreateTaskResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Create task
+      tags:
+      - tasks
+  /tasks/{task_uuid}:
+    get:
+      description: Returns a task by UUID.
+      parameters:
+      - description: Task UUID
+        in: path
+        name: task_uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.TaskResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Get task
+      tags:
+      - tasks
+  /tasks/{task_uuid}/cancel:
+    post:
+      description: Cancels or dequeues a task by UUID.
+      parameters:
+      - description: Task UUID
+        in: path
+        name: task_uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.TaskResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Cancel task
+      tags:
+      - tasks
+swagger: "2.0"
