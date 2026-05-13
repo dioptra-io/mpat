@@ -20,7 +20,7 @@ import (
 	_ "github.com/marcboeker/go-duckdb"
 )
 
-const defaultBatchSize = 10_000
+const defaultBatchSize = 1
 
 const createSQL = `
 CREATE TABLE IF NOT EXISTS fies (
@@ -87,7 +87,7 @@ func retinaStream(ctx context.Context, task *api.Task, workerID int, logger *slo
 	if err != nil {
 		return fmt.Errorf("open duckdb database: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if _, err := db.ExecContext(streamCtx, createSQL); err != nil {
 		return fmt.Errorf("create duckdb schema: %w", err)
@@ -133,7 +133,7 @@ func streamRetinaToDuckDB(
 	if err != nil {
 		return fmt.Errorf("open retina stream: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("retina stream returned status %s", resp.Status)
@@ -147,7 +147,10 @@ func streamRetinaToDuckDB(
 			return nil
 		}
 
-		if err := insertBatch(ctx, db, batch); err != nil {
+		writeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := insertBatch(writeCtx, db, batch); err != nil {
 			return err
 		}
 
@@ -204,6 +207,14 @@ func streamRetinaToDuckDB(
 	return flush()
 }
 
+func stringValue(v any) string {
+	if v == nil {
+		return ""
+	}
+
+	return fmt.Sprint(v)
+}
+
 func insertBatch(ctx context.Context, db *sql.DB, batch []api.SequencedFIE) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -215,7 +226,7 @@ func insertBatch(ctx context.Context, db *sql.DB, batch []api.SequencedFIE) erro
 		_ = tx.Rollback()
 		return fmt.Errorf("prepare insert: %w", err)
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, r := range batch {
 		near := r.NearInfo
@@ -239,13 +250,13 @@ func insertBatch(ctx context.Context, db *sql.DB, batch []api.SequencedFIE) erro
 			r.DestinationAddress,
 			near.ProbeTTL,
 			near.ReplyAddress,
-			near.SentTimestamp,
-			near.ReceivedTimestamp,
+			stringValue(near.SentTimestamp),
+			stringValue(near.ReceivedTimestamp),
 			far.ProbeTTL,
 			far.ReplyAddress,
-			far.SentTimestamp,
-			far.ReceivedTimestamp,
-			r.ProductionTimestamp,
+			stringValue(far.SentTimestamp),
+			stringValue(far.ReceivedTimestamp),
+			stringValue(r.ProductionTimestamp),
 		)
 		if err != nil {
 			_ = tx.Rollback()

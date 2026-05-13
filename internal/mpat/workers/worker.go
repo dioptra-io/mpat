@@ -15,7 +15,8 @@ func InvokeWorker(ctx context.Context, task *api.Task, workerId int, logger *slo
 	case api.TaskTypeRetinaStream:
 		// handle accordingle
 		if err := retinaStream(ctx, task, workerId, logger); err != nil {
-			// handle the cancellation.
+			logger.Warn("retina stream terminated with error", "err", err)
+			return err
 		}
 	default:
 		return fmt.Errorf("unknown type for the task: %s", task.Type())

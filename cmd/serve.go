@@ -15,6 +15,8 @@ var (
 	serveAddr         string
 	serveNumWorkers   int
 	serveDatabaseFile string
+	serveDataDir      string
+	serveScriptsDir   string
 )
 
 // serveCmd represents the serve command
@@ -38,13 +40,21 @@ and processes them asynchronously using worker goroutines.`,
 		if serveDatabaseFile == ":memory:" {
 			workerStore = mpat.NewMPATMemoryStore()
 		} else {
-			panic("not implemented the non-emphemeral worker store")
+			store, err := mpat.NewMPATSQLiteStore(serveDatabaseFile)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = store.Close() }()
+
+			workerStore = store
 		}
 
 		w, err := mpat.NewServer(mpat.MPATServerConfig{
 			Addr:       serveAddr,
 			NumWorkers: serveNumWorkers,
 			QueueSize:  1024,
+			DataDir:    serveDataDir,
+			ScriptsDir: serveScriptsDir,
 		}, workerStore, logger)
 		if err != nil {
 			return err
@@ -54,11 +64,15 @@ and processes them asynchronously using worker goroutines.`,
 			"worker initialized",
 			"addr", serveAddr,
 			"num_workers", serveNumWorkers,
+			"db_file", serveDatabaseFile,
+			"data_dir", serveDataDir,
+			"scripts_dir", serveScriptsDir,
 		)
 
 		if err := w.Run(ctx); err != nil && !errors.Is(err, ctx.Err()) {
 			return err
 		}
+
 		return nil
 	},
 }
@@ -69,4 +83,6 @@ func init() {
 	serveCmd.Flags().StringVar(&serveAddr, "address", "localhost:9293", "http listen address")
 	serveCmd.Flags().IntVar(&serveNumWorkers, "num-workers", 1, "number of concurrent workers")
 	serveCmd.Flags().StringVar(&serveDatabaseFile, "db-file", ":memory:", "database file for worker store, (:memory: for memory only)")
+	serveCmd.Flags().StringVar(&serveDataDir, "data-dir", "data", "directory for task data")
+	serveCmd.Flags().StringVar(&serveScriptsDir, "scripts-dir", "scripts", "directory for scripts")
 }
