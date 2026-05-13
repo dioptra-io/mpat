@@ -1,51 +1,96 @@
-.PHONY: count-go-lines test build help check-build check-vet check-all install
+APP_NAME := mp
+BUILD_DIR := build
 
-VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-GIT_COMMIT := $(shell git rev-parse --short HEAD)
-BUILD_DATE := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
-GO_VERSION := $(shell go version | awk '{print $$3}')
-GO_BIN := $(shell go env GOPATH)/bin
-SHELL_NAME := $(shell basename $$SHELL)
+GO := go
+GOFMT := gofmt
+GOTEST := go test
+GOBUILD := go build
+GORUN := go run
+GOMOD := go mod
 
-help: ## Display this help message
-	@echo "Makefile for MPAT (Measurement Platform Analysis Tool), the targets are listed below:\\n"
-	@awk 'BEGIN {FS = ":.*?## "; OFS = " : ";} \
-		/^[a-zA-Z_-]+:.*?##/ { \
-			printf "\033[36m%-22s\033[0m%s\n", $$1, $$2; \
-		}' $(MAKEFILE_LIST)
-	@echo "\\n"
+GOBIN ?= $(shell go env GOBIN)
+GOPATH_BIN := $(shell go env GOPATH)/bin
 
-build: ## Compile the executable under build/mpat
-	go build -ldflags "-X main.Version=$(VERSION) \
-		-X main.GitCommit=$(GIT_COMMIT) \
-		-X main.BuildDate=$(BUILD_DATE) \
-		-X main.GoVersion=$(GO_VERSION)" \
-		-o build/mpat cmd/mpat/main.go
+ifeq ($(GOBIN),)
+GOBIN := $(GOPATH_BIN)
+endif
 
-install: build ## Copy the binary into $GOPATH/bin foler.
-	install ./build/mpat "$(GO_BIN)/mpat"
+VERSION ?= dev
+COMMIT := $(shell git rev-parse --short HEAD)
+DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-	@echo "\nTo enable shell completions:"
-	@printf "\033[36msource <(mpat completion $(SHELL_NAME))\033[0m\n"
-	@echo ""
+LDFLAGS := -ldflags "\
+-X 'github.com/dioptra-io/ufuk-research/cmd.version=$(VERSION)' \
+-X 'github.com/dioptra-io/ufuk-research/cmd.commit=$(COMMIT)' \
+-X 'github.com/dioptra-io/ufuk-research/cmd.date=$(DATE)'"
 
+.DEFAULT_GOAL := help
 
-test: ## Run go test for all of the packages
-	go test ./...
+.PHONY: help
+help: ## help Display this help menu
+	@awk 'BEGIN { \
+		FS = ":.*## "; \
+		printf "Help menu for MPAT: Measurement Platform Analysis Tool\n"; \
+	} \
+	/^[a-zA-Z0-9_\-]+:.*## / { \
+		category = $$2; \
+		sub(/ .*/, "", category); \
+		description = $$2; \
+		sub(/^[^ ]+ /, "", description); \
+		targets[category] = targets[category] sprintf("  %-15s %s\n", $$1, description); \
+	} \
+	END { \
+		printf "\n"; \
+		for (category in targets) { \
+			printf "%s\n", toupper(category); \
+			printf "%s", targets[category]; \
+			printf "\n"; \
+		} \
+	}' $(MAKEFILE_LIST)
 
-check-build: ## Check for compilation issues
-	go build ./...
+.PHONY: fmt
+fmt: ## make Format Go source files
+	$(GOFMT) -w .
 
-vet: ## Check for linting issues
-	go vet ./...
+.PHONY: tidy
+tidy: ## make Clean and synchronize go.mod
+	$(GOMOD) tidy
 
-check-all: check-vet check-build ## Check for building and linting issues
+.PHONY: vet
+vet: ## make Run go vet
+	$(GO) vet ./...
 
-clean: ## Run go clean command, also removes the mod cache
-	go clean --modcache
+.PHONY: lint
+lint: ## make Run golangci-lint
+	golangci-lint run
 
-count-go-lines: ## Return the number of lines for each go file
-	@find . -name "*.go" -exec wc -l {} +
+.PHONY: test
+test: ## execution Run tests
+	$(GOTEST) ./...
 
-version: ## Get the version the binary will be compiled to
-	@echo $(VERSION)
+.PHONY: build
+build: fmt vet lint ## execution Run checks and build the MPAT binary
+	@mkdir -p $(BUILD_DIR)
+	$(GOBUILD) -o $(BUILD_DIR)/$(APP_NAME) .
+
+.PHONY: install
+install: build ## execution Build and install binary as mp
+	@mkdir -p $(GOBIN)
+	cp $(BUILD_DIR)/$(APP_NAME) $(GOBIN)/mp
+	@echo "Installed to $(GOBIN)/mp"
+
+.PHONY: run
+run: ## execution Run the application
+	$(GORUN) .
+
+.PHONY: serve
+serve: ## execution Run the MPAT server
+	$(GORUN) . serve
+
+.PHONY: deps
+deps: ## make Download dependencies
+	$(GOMOD) download
+
+.PHONY: clean
+clean: ## make Remove build artifacts
+	rm -rf $(BUILD_DIR)

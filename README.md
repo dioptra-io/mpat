@@ -1,136 +1,289 @@
-# MPAT: Measurement Pipeline for Adaptive Tracing
-<p align="center">
-  <img src="assets/mpat-logo.png" alt="MPAT Logo" width="200"/>
-</p>
+# MPAT
 
-MPAT is a high-performance command-line tool for enhancing Internet-scale route tracing measurements. It enables researchers and network operators to extract and analyze forwarding behavior from traceroute-like data and compute key metrics to assess the quality and coverage of measurements.
+**MPAT** (Measurement Platform Analysis Tool) is a lightweight and extensible task-oriented platform for interacting with internet measurement infrastructures.
 
----
+The goal of MPAT is to provide a unified and simple interface for collecting, managing, and analyzing measurement data from multiple platforms without exposing users to platform-specific operational complexity.
 
-## Overview
+MPAT is designed around a worker-server architecture:
 
-Internet Measurement Platforms (IMPs) like CAIDA Ark and RIPE Atlas collect massive amounts of probe data for observing network behavior. However, interpreting and acting on this data can be difficult due to its scale and complexity.
+- A persistent server manages tasks
+- Clients submit jobs through a simple CLI
+- Tasks are queued and executed asynchronously
+- Results and task metadata are stored locally
 
-**MPAT** addresses this challenge by:
-
-- Constructing forwarding information from traceroute data.
-- Calculating route quality metrics.
-- Guiding informed and adaptive probing strategies.
-
-MPAT is part of Sorbonne’s **IP Route Survey** (IPRS) initiative: [https://iprs.dioptra.io](https://iprs.dioptra.io)
+The system is intentionally minimal and automation-friendly.
 
 ---
 
-## Features
+# Design Goals
 
-- 📦 **Go-based** implementation for high concurrency and performance.
-- ⚡ **ClickHouse** integration for efficient data storage and querying.
-- 🧱 Modular pipeline design — each processing stage is independently runnable or chainable.
-- 📈 Computation of:
-  - **Forwarding Decisions**
-  - **Forwarding Information Tuples**
-  - **Route Score**
-  - **Route Completeness**
-- 🎯 Adaptive probing support based on gaps in observed paths.
-
----
-
-## Concepts
-
-### Forwarding Information
-
-Forwarding info summarizes how a router interface routes toward a set of prefixes. It is a 3-tuple:
-```
-
-(an, d, Af)
-
-````
-Where:
-- `an`: router interface address
-- `d`: destination prefix
-- `Af`: set of next-hop addresses
-
-The implementation uses a radix-tree.
-
-### Metrics
-
-- **Route Score**: Number of distinct /24 (or /48) prefixes a router interface forwards to.
-- **Route Completeness**: Fraction of public IP space observed through a given router.
+- Simple command-line interface
+- Unified interaction model across platforms
+- Asynchronous task execution
+- Queue-based processing
+- Persistent local task database
+- Easy integration into analysis pipelines
+- Remote worker execution support
+- Extensible platform architecture
 
 ---
 
-## Architecture
+# Supported Platforms
 
-MPAT pipeline stages:
+| Platform Name | Backend Tool |
+|---|---|
+| `caida` | `ark` |
+| `iprs` | `iris` |
+| `iprl` | `retina` |
 
-1. **Ingestion** – Load raw probe data into ClickHouse.
-2. **Normalization** – Convert probe data into a standard format.
-3. **Forwarding Decision Computation** – Derive routing steps.
-4. **Forwarding Info Extraction** – Infer router behavior.
-5. **Metric Calculation** – Quantify measurement coverage.
-6. **Adaptive Probing** – Trigger probes to fill in missing data.
+The internal implementation details are abstracted away from the user.
 
----
-
-## Getting Started
-
-> 📌 **Prerequisites**:
-> - Go 1.18+
-> - ClickHouse Server
-> - Access to traceroute-like raw probe data
-
-### Clone and Build
+Users interact directly with the measurement tools:
 
 ```bash
-git clone https://github.com/your-org/mpat.git
-cd mpat
-go build -o mpat ./cmd/mpat
+mp get ark <args>
+mp get iris <args>
+mp get retina <args>
 ````
 
-### Configuration
-
-Set up ClickHouse and ensure credentials and target schema are properly configured in `config.yaml`.
-
 ---
 
-## Usage
+# Architecture
 
-Basic pipeline:
+MPAT operates in two parts:
 
-```bash
-./mpat upload iris-results '2025-05-05'
-TBD
+1. CLI client
+2. Worker server
+
+The server exposes an HTTP endpoint and processes incoming jobs.
+
+The client submits commands to the server.
+
+```text
++-------------+        HTTP        +----------------+
+| CLI Client  | --------------->  | MPAT Server    |
++-------------+                   +----------------+
+                                          |
+                                          v
+                                  +---------------+
+                                  | Task Queue    |
+                                  +---------------+
+                                          |
+                                          v
+                                  +---------------+
+                                  | Workers       |
+                                  +---------------+
+                                          |
+                                          v
+                                  +---------------+
+                                  | Local DB      |
+                                  +---------------+
 ```
 
-Each step can also be executed independently or integrated into a larger system like IPRS.
+---
+
+# Running the Server
+
+Start the MPAT worker server:
+
+```bash
+mp serve
+```
+
+By default this exposes:
+
+```text
+http://localhost:9293
+```
+
+The server:
+
+* Accepts incoming tasks
+* Queues jobs
+* Executes tasks asynchronously
+* Stores task metadata locally
 
 ---
 
-## Roadmap
+# Worker Configuration
 
-- [ ] Retrieving data from:
-    - [x] Iris production instance
-    - [x] Ark dataset
-    - [ ] RIPE dataset
-- [ ] Forwarding decision computation 
-- [ ] Metric computation
-    - [ ] Route score 
-    - [ ] Route completeness 
+The number of concurrent workers can be configured:
 
----
+```bash
+mp serve --num-workers 4
+```
 
-## Contributors
-
-* Ufuk Bombar – Sorbonne Université / LINCS
-* Timur Friedman – Sorbonne Université / LINCS
-* Olivier Fourmaux – Sorbonne Université
-* Kevin Vermeulen – LAAS-CNRS
+This allows parallel execution of queued tasks.
 
 ---
 
+# Submitting Tasks
 
-## License
+Measurement jobs are submitted using the `get` command.
 
-MIT License
+Examples:
 
+```bash
+mp get retina <args>
+```
 
+```bash
+mp get iris <args>
+```
+
+```bash
+mp get ark <args>
+```
+
+When a command is submitted:
+
+1. A task is created
+2. The task is persisted locally
+3. The task enters the queue
+4. A worker processes the task
+5. Task state is updated
+
+---
+
+# Task Management
+
+MPAT provides task inspection and queue management commands.
+
+## List all tasks
+
+```bash
+mp ls
+```
+
+---
+
+## Show queued and running tasks
+
+```bash
+mp queue
+```
+
+---
+
+## Show completed tasks
+
+```bash
+mp done
+```
+
+---
+
+## Cancel a task
+
+```bash
+mp cancel <task-id>
+```
+
+This removes the task from the queue or stops execution if possible.
+
+---
+
+# Task Lifecycle
+
+```text
+Queued -> Running -> Done
+                \
+                 -> Failed
+```
+
+Tasks are persisted in the local database for inspection and reproducibility.
+
+---
+
+# Local Database
+
+The MPAT server maintains a local database containing:
+
+* Task metadata
+* Execution status
+* Parameters
+* Timing information
+* Logs
+* Results metadata
+
+This allows:
+
+* Persistent queues
+* Recovery after restart
+* Task history inspection
+* Future analysis integration
+
+---
+
+# Example Workflow
+
+Start the worker server:
+
+```bash
+mp serve --num-workers 2
+```
+
+Submit tasks:
+
+```bash
+mp get retina --target 1.1.1.1
+```
+
+```bash
+mp get ark --from paris
+```
+
+Inspect the queue:
+
+```bash
+mp queue
+```
+
+List completed jobs:
+
+```bash
+mp done
+```
+
+---
+
+# Long-Term Vision
+
+MPAT is intended to evolve into a general-purpose internet measurement orchestration platform.
+
+Planned directions include:
+
+* Distributed workers
+* Remote execution nodes
+* Result querying
+* Data export pipelines
+* Plugin system
+* Analysis modules
+* Web dashboard
+* Scheduling
+* Streaming measurements
+* Reproducible experiments
+
+The core philosophy is:
+
+> Simple commands, persistent execution, scalable analysis.
+
+---
+
+# Status
+
+Early development.
+
+The current focus is:
+
+* Core task execution
+* Queue management
+* Worker orchestration
+* Platform abstraction
+* Stable CLI interface
+
+---
+
+# License
+
+MIT Licence
