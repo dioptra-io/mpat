@@ -16,7 +16,7 @@ const (
 
 type Task struct {
 	UUID      string     `json:"uuid"`
-	Status    string     `json:"status"`
+	Status    TaskStatus `json:"status"`
 	Artifacts []Artifact `json:"artifacts"`
 
 	// One of Get

@@ -28,7 +28,7 @@ func (s *InMemoryWorkerStore) CreateTask(ctx context.Context, req api.CreateTask
 
 	task := api.Task{
 		UUID:      taskUUID,
-		Status:    string(api.TaskStatusQueued),
+		Status:    api.TaskStatus(api.TaskStatusQueued),
 		Artifacts: []api.Artifact{},
 		Get:       req.Get,
 	}
@@ -89,7 +89,7 @@ func (s *InMemoryWorkerStore) ListTasksByStatus(ctx context.Context, statuses ..
 	tasks := make([]api.Task, 0)
 
 	for _, task := range s.tasks {
-		if _, ok := statusSet[task.Status]; ok {
+		if _, ok := statusSet[string(task.Status)]; ok {
 			tasks = append(tasks, task)
 		}
 	}
@@ -110,7 +110,7 @@ func (s *InMemoryWorkerStore) UpdateTaskStatus(ctx context.Context, taskUUID str
 		return ErrTaskNotFound
 	}
 
-	task.Status = string(status)
+	task.Status = api.TaskStatus(status)
 	s.tasks[taskUUID] = task
 
 	return nil
@@ -129,7 +129,7 @@ func (s *InMemoryWorkerStore) CancelTask(ctx context.Context, taskUUID string) (
 		return api.Task{}, ErrTaskNotFound
 	}
 
-	task.Status = string(api.TaskStatusCancelled)
+	task.Status = api.TaskStatus(api.TaskStatusCancelled)
 	s.tasks[taskUUID] = task
 
 	return task, nil

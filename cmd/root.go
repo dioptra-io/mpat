@@ -14,6 +14,7 @@ import (
 
 var (
 	debug  bool
+	addr   string
 	logger *slog.Logger
 
 	// injected at build time
@@ -78,5 +79,12 @@ func init() {
 			commit,
 			date,
 		),
+	)
+
+	rootCmd.PersistentFlags().StringVar(
+		&addr,
+		"addr",
+		"http://localhost:9293",
+		"worker HTTP server address",
 	)
 }

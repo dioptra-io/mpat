@@ -60,32 +60,27 @@ definitions:
         - $ref: '#/definitions/api.GetTask'
         description: One of Get
       status:
-        type: string
+        $ref: '#/definitions/api.TaskStatus'
       uuid:
         type: string
     type: object
+  api.TaskStatus:
+    enum:
+    - queued
+    - running
+    - done
+    - failed
+    - cancelled
+    type: string
+    x-enum-varnames:
+    - TaskStatusQueued
+    - TaskStatusRunning
+    - TaskStatusDone
+    - TaskStatusFailed
+    - TaskStatusCancelled
 info:
   contact: {}
 paths:
-  /done:
-    get:
-      description: Returns tasks that completed successfully.
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/api.Task'
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-      summary: List completed tasks
-      tags:
-      - tasks
   /healthz:
     get:
       description: Returns ok if the MPAT worker server is alive.
@@ -99,25 +94,6 @@ paths:
       summary: Health check
       tags:
       - health
-  /queue:
-    get:
-      description: Returns tasks that are queued or currently running.
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/api.Task'
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-      summary: List queued and running tasks
-      tags:
-      - tasks
   /tasks:
     get:
       description: Returns all known tasks.
@@ -230,6 +206,120 @@ paths:
           schema:
             $ref: '#/definitions/api.ErrorResponse'
       summary: Cancel task
+      tags:
+      - tasks
+  /tasks/canceled:
+    get:
+      description: Returns tasks that were canceled.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.Task'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: List canceled tasks
+      tags:
+      - tasks
+  /tasks/done:
+    get:
+      description: Returns tasks that completed successfully.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.Task'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: List completed tasks
+      tags:
+      - tasks
+  /tasks/failed:
+    get:
+      description: Returns tasks that failed during execution.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.Task'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: List failed tasks
+      tags:
+      - tasks
+  /tasks/queued:
+    get:
+      description: Returns tasks that are currently queued.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.Task'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: List queued tasks
+      tags:
+      - tasks
+  /tasks/running:
+    get:
+      description: Returns tasks that are currently running.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.Task'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: List running tasks
+      tags:
+      - tasks
+  /tasks/terminated:
+    get:
+      description: Returns tasks that reached a terminal state (done, failed, or canceled).
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/api.Task'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: List terminated tasks
       tags:
       - tasks
 swagger: "2.0"
