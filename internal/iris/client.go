@@ -261,9 +261,10 @@ func (c *IrisClient) fetchAllMeasurements(state MeasurementAgentState, cutoff *t
 type clickhouseFormat string
 
 const (
-	formatRaw  clickhouseFormat = ""
-	formatJSON clickhouseFormat = "JSONEachRow"
-	formatCSV  clickhouseFormat = "CSVWithNames"
+	formatRaw       clickhouseFormat = ""
+	formatJSON      clickhouseFormat = "JSONEachRow"
+	formatCSV       clickhouseFormat = "CSVWithNames"
+	formatRowBinary clickhouseFormat = "RowBinaryWithNamesAndTypes"
 )
 
 // QueryBuilder is created by client.Query() and holds a reference to the client.
@@ -320,6 +321,7 @@ func (q *SelectQuery) execute(format clickhouseFormat) (io.ReadCloser, error) {
 	params := url.Values{}
 	params.Set("query", sql)
 	params.Set("database", creds.Database)
+	params.Set("enable_http_compression", "1")
 
 	u := creds.BaseURL + "?" + params.Encode()
 
@@ -328,6 +330,7 @@ func (q *SelectQuery) execute(format clickhouseFormat) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("iris: failed to build clickhouse request: %w", err)
 	}
 	req.SetBasicAuth(creds.Username, creds.Password)
+	req.Header.Set("Accept-Encoding", "gzip")
 
 	resp, err := q.client.http.Do(req)
 	if err != nil {

@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -29,13 +30,6 @@ type StoreConfig struct {
 	Database         string // defaults to "mpat"
 }
 
-func (c *StoreConfig) database() string {
-	if c.Database == "" {
-		return defaultDatabase
-	}
-	return c.Database
-}
-
 // ── DestTable ─────────────────────────────────────────────────────────────────
 
 type DestTable struct {
@@ -54,16 +48,25 @@ const (
 	PolicyAppend   Policy = "append"
 )
 
+// ── insertFormat ─────────────────────────────────────────────────────────────
+
+type insertFormat string
+
+const (
+	FormatJSON      insertFormat = "JSONEachRow"
+	FormatRowBinary insertFormat = "RowBinaryWithNamesAndTypes"
+)
+
 // ── Store ────────────────────────────────────────────────────────────────────
 
 type Store struct {
 	conn       clickhouse.Conn
 	config     StoreConfig
 	httpClient *http.Client
-	httpDSN    *dsn // parsed from connection string for HTTP inserts
+	httpDSN    *dsn
 }
 
-// dsn holds the parsed connection info for HTTP inserts.
+// dsn holds parsed connection info for HTTP inserts.
 type dsn struct {
 	host     string
 	database string
@@ -106,7 +109,7 @@ func NewStore(cfg StoreConfig) (*Store, error) {
 	password, _ := u.User.Password()
 	database := cfg.Database
 	if u.Path != "" && u.Path != "/" {
-		database = u.Path[1:] // strip leading /
+		database = u.Path[1:]
 	}
 
 	return &Store{
@@ -139,10 +142,19 @@ func ResultsDDL(dest DestTable) (string, error) {
 
 // ── Put ──────────────────────────────────────────────────────────────────────
 
-// Put writes rows into dest according to the given policy.
-// schema is the CREATE TABLE DDL string (e.g. from ResultsDDL).
-// rows is a JSONEachRow stream (one JSON object per line).
+// Put writes a JSONEachRow stream into dest according to the given policy.
 func (s *Store) Put(policy Policy, dest DestTable, schema string, rows io.ReadCloser) error {
+	return s.put(policy, dest, schema, rows, FormatJSON)
+}
+
+// PutRowBinary writes a RowBinaryWithNamesAndTypes stream into dest according to the given policy.
+// More efficient than Put for large tables — no JSON parsing overhead on either side.
+func (s *Store) PutRowBinary(policy Policy, dest DestTable, schema string, rows io.ReadCloser) error {
+	return s.put(policy, dest, schema, rows, FormatRowBinary)
+}
+
+// put is the shared implementation for Put and PutRowBinary.
+func (s *Store) put(policy Policy, dest DestTable, schema string, rows io.ReadCloser, format insertFormat) error {
 	defer rows.Close()
 
 	ctx := context.Background()
@@ -192,7 +204,7 @@ func (s *Store) Put(policy Policy, dest DestTable, schema string, rows io.ReadCl
 		return fmt.Errorf("store: unknown policy %q", policy)
 	}
 
-	return s.insert(dest, rows)
+	return s.insert(dest, rows, format)
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -226,10 +238,11 @@ func (s *Store) exec(ctx context.Context, query string) error {
 	return s.conn.Exec(ctx, query)
 }
 
-// insert streams a JSONEachRow reader directly into ClickHouse via HTTP.
-// This avoids deserializing and re-serializing every row in Go.
-func (s *Store) insert(dest DestTable, rows io.Reader) error {
-	query := fmt.Sprintf("INSERT INTO %s.%s FORMAT JSONEachRow", dest.Database, dest.Table)
+// insert streams rows directly into ClickHouse via HTTP POST.
+// If the stream is gzip-compressed, it is decompressed transparently before sending.
+// The format must match what the caller used to produce the stream.
+func (s *Store) insert(dest DestTable, rows io.Reader, format insertFormat) error {
+	query := fmt.Sprintf("INSERT INTO %s.%s FORMAT %s", dest.Database, dest.Table, format)
 
 	params := url.Values{}
 	params.Set("query", query)
@@ -237,7 +250,25 @@ func (s *Store) insert(dest DestTable, rows io.Reader) error {
 
 	u := fmt.Sprintf("http://%s/?%s", s.httpDSN.host, params.Encode())
 
-	req, err := http.NewRequest(http.MethodPost, u, rows)
+	// Peek at the first two bytes to detect gzip magic number (0x1f 0x8b).
+	buf := make([]byte, 2)
+	n, err := io.ReadFull(rows, buf)
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return fmt.Errorf("store: failed to peek stream: %w", err)
+	}
+	peeked := io.MultiReader(bytes.NewReader(buf[:n]), rows)
+
+	var body io.Reader = peeked
+	if n == 2 && buf[0] == 0x1f && buf[1] == 0x8b {
+		gz, err := gzip.NewReader(peeked)
+		if err != nil {
+			return fmt.Errorf("store: failed to create gzip reader: %w", err)
+		}
+		defer gz.Close()
+		body = gz
+	}
+
+	req, err := http.NewRequest(http.MethodPost, u, body)
 	if err != nil {
 		return fmt.Errorf("store: failed to build insert request: %w", err)
 	}
