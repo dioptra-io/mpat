@@ -166,8 +166,14 @@ func runIrisResults(destTable string, policy store.Policy, tableFlag, measuremen
 	}
 
 	// ── Fetch and write ───────────────────────────────────────────────────────
-	for _, sourceTable := range sourceTables {
-		if err := fetchAndWrite(irisClient, s, sourceTable, dest, schema, policy); err != nil {
+	for i, sourceTable := range sourceTables {
+		// Only apply the original policy on the first table.
+		// All subsequent tables always append so we don't clobber previous data.
+		tablePolicy := policy
+		if i > 0 {
+			tablePolicy = store.PolicyAppend
+		}
+		if err := fetchAndWrite(irisClient, s, sourceTable, dest, schema, tablePolicy); err != nil {
 			return fmt.Errorf("failed to write table %s: %w", sourceTable, err)
 		}
 	}
@@ -204,15 +210,14 @@ func fetchAndWrite(irisClient *iris.IrisClient, s *store.Store, sourceTable stri
 			thisChunk = remaining
 		}
 
-		fmt.Printf("  chunk %d/%d\n", i+1, chunks)
-
+		chunkInfo := fmt.Sprintf("chunk %d/%d", i+1, chunks)
 		sql := fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d", sourceTable, chunkSize, offset)
 		rows, err := irisClient.Query().Select(sql).Json()
 		if err != nil {
 			return fmt.Errorf("chunk %d: failed to query: %w", i+1, err)
 		}
 
-		if err := s.Put(chunkPolicy, dest, schema, rows, thisChunk); err != nil {
+		if err := s.Put(chunkPolicy, dest, schema, rows, thisChunk, chunkInfo); err != nil {
 			return fmt.Errorf("chunk %d: failed to write: %w", i+1, err)
 		}
 	}

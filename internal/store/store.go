@@ -231,41 +231,53 @@ func (r *rowCountingReader) Read(p []byte) (n int, err error) {
 
 // ── Progress reporting ────────────────────────────────────────────────────────
 
+const ewmaAlpha = 0.2
+
 // progressReporter reads from counter and prints stats every interval.
+// Uses EWMA (alpha=0.2) to smooth the rows/sec estimate.
 // Runs in a goroutine; stops when done is closed.
-func progressReporter(counter *atomic.Int64, total int64, interval time.Duration, start time.Time, done <-chan struct{}) {
+func progressReporter(counter *atomic.Int64, total int64, interval time.Duration, start time.Time, chunkInfo string, done <-chan struct{}) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
+	var (
+		ewmaRate    float64
+		lastFetched int64
+	)
 
 	for {
 		select {
 		case <-done:
 			return
 		case <-ticker.C:
-			printProgress(counter.Load(), total, start)
+			fetched := counter.Load()
+			delta := fetched - lastFetched
+			lastFetched = fetched
+
+			currentRate := float64(delta) / interval.Seconds()
+			if ewmaRate == 0 {
+				ewmaRate = currentRate
+			} else {
+				ewmaRate = ewmaAlpha*currentRate + (1-ewmaAlpha)*ewmaRate
+			}
+
+			printProgress(chunkInfo, fetched, total, ewmaRate, time.Since(start))
 		}
 	}
 }
 
-func printProgress(fetched, total int64, start time.Time) {
-	elapsed := time.Since(start)
-	elapsedSec := elapsed.Seconds()
-
+func printProgress(chunkInfo string, fetched, total int64, ewmaRate float64, elapsed time.Duration) {
 	var (
-		pct        float64
-		rowsPerSec float64
-		remaining  time.Duration
-		eta        string
+		pct       float64
+		remaining time.Duration
+		eta       string
 	)
 
-	if elapsedSec > 0 {
-		rowsPerSec = float64(fetched) / elapsedSec
-	}
 	if total > 0 {
 		pct = float64(fetched) / float64(total) * 100
 	}
-	if rowsPerSec > 0 && total > fetched {
-		remainingSec := float64(total-fetched) / rowsPerSec
+	if ewmaRate > 0 && total > fetched {
+		remainingSec := float64(total-fetched) / ewmaRate
 		remaining = time.Duration(remainingSec) * time.Second
 		eta = time.Now().Add(remaining).Format("Jan 2, 3:04pm")
 	} else {
@@ -273,11 +285,12 @@ func printProgress(fetched, total int64, start time.Time) {
 	}
 
 	fmt.Printf(
-		"  rows: %s / %s (%.1f%%) | %.0f rows/s | elapsed: %s | remaining: ~%s | ETA: %s\n",
+		"  %s | rows: %s / %s (%.1f%%) | %.0f rows/s | elapsed: %s | remaining: ~%s | ETA: %s\n",
+		chunkInfo,
 		FormatCount(fetched),
 		FormatCount(total),
 		pct,
-		rowsPerSec,
+		ewmaRate,
 		elapsed.Round(time.Second),
 		remaining.Round(time.Second),
 		eta,
