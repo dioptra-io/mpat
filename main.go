@@ -14,6 +14,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const chunkSize = 5_000_000 // 5M rows per chunk
+
 func main() {
 	var (
 		policy      string
@@ -168,29 +170,58 @@ func runIrisResults(destTable string, policy store.Policy, tableFlag, measuremen
 
 	// ── Fetch and write ───────────────────────────────────────────────────────
 	for _, sourceTable := range sourceTables {
-		// Get total row count from Iris for progress reporting.
-		total, err := countSourceRows(irisClient, sourceTable)
-		if err != nil {
-			return fmt.Errorf("failed to count rows in source table %s: %w", sourceTable, err)
-		}
-
-		fmt.Printf("fetching %s → %s.%s (policy: %s, total: %s rows)\n",
-			sourceTable, dest.Database, dest.Table, policy, store.FormatCount(total))
-
-		rows, err := irisClient.Query().
-			Select(fmt.Sprintf("SELECT * FROM %s", sourceTable)).
-			Json()
-		if err != nil {
-			return fmt.Errorf("failed to query source table %s: %w", sourceTable, err)
-		}
-
-		if err := s.Put(policy, dest, schema, rows, total, reportEvery); err != nil {
+		if err := fetchAndWrite(irisClient, s, sourceTable, dest, schema, policy, reportEvery); err != nil {
 			return fmt.Errorf("failed to write table %s: %w", sourceTable, err)
 		}
-
-		fmt.Printf("done: %s\n", sourceTable)
 	}
 
+	return nil
+}
+
+// fetchAndWrite fetches a source table in chunks and writes to dest.
+// The first chunk applies the policy; subsequent chunks always append.
+func fetchAndWrite(irisClient *iris.IrisClient, s *store.Store, sourceTable string, dest store.DestTable, schema string, policy store.Policy, reportEvery time.Duration) error {
+	total, err := countSourceRows(irisClient, sourceTable)
+	if err != nil {
+		return fmt.Errorf("failed to count rows: %w", err)
+	}
+
+	fmt.Printf("fetching %s → %s.%s (policy: %s, total: %s rows)\n",
+		sourceTable, dest.Database, dest.Table, policy, store.FormatCount(total))
+
+	chunks := (total + chunkSize - 1) / chunkSize
+	if chunks == 0 {
+		chunks = 1
+	}
+
+	for i := int64(0); i < chunks; i++ {
+		offset := i * chunkSize
+		chunkPolicy := store.PolicyAppend
+		if i == 0 {
+			chunkPolicy = policy
+		}
+
+		remaining := total - offset
+		thisChunk := int64(chunkSize)
+		if remaining < thisChunk {
+			thisChunk = remaining
+		}
+
+		fmt.Printf("  chunk %d/%d (offset: %s, size: %s)\n",
+			i+1, chunks, store.FormatCount(offset), store.FormatCount(thisChunk))
+
+		sql := fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d", sourceTable, chunkSize, offset)
+		rows, err := irisClient.Query().Select(sql).Json()
+		if err != nil {
+			return fmt.Errorf("chunk %d: failed to query: %w", i+1, err)
+		}
+
+		if err := s.Put(chunkPolicy, dest, schema, rows, thisChunk, reportEvery); err != nil {
+			return fmt.Errorf("chunk %d: failed to write: %w", i+1, err)
+		}
+	}
+
+	fmt.Printf("done: %s\n", sourceTable)
 	return nil
 }
 
@@ -204,7 +235,6 @@ func countSourceRows(client *iris.IrisClient, sourceTable string) (int64, error)
 	}
 	defer r.Close()
 
-	// Response may be gzip-compressed — decompress transparently.
 	reader, err := decompressIfNeeded(r)
 	if err != nil {
 		return 0, fmt.Errorf("failed to decompress count response: %w", err)
