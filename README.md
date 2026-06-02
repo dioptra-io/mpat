@@ -130,7 +130,7 @@ mp fetch iris-results my_results \
   --from  2026-06-01T00:00:00Z \
   --to    2026-06-02T00:00:00Z \
   --state finished \
-  --tag   "diamond-miner.*" \
+  --tag   "zeph" \
   --policy append
 ```
 
