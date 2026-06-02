@@ -116,7 +116,7 @@ func NewStore(cfg StoreConfig) (*Store, error) {
 	return &Store{
 		conn:       conn,
 		config:     cfg,
-		httpClient: &http.Client{Timeout: 0},
+		httpClient: &http.Client{},
 		httpDSN: &dsn{
 			host:     host,
 			database: database,
@@ -339,6 +339,9 @@ func (s *Store) insert(dest DestTable, rows io.Reader, format insertFormat, tota
 	params := url.Values{}
 	params.Set("query", query)
 	params.Set("database", dest.Database)
+	params.Set("max_execution_time", "3600")
+	params.Set("receive_timeout", "3600")
+	params.Set("send_timeout", "3600")
 
 	u := fmt.Sprintf("http://%s/?%s", s.httpDSN.host, params.Encode())
 
