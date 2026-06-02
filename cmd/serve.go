@@ -16,7 +16,7 @@ var (
 	serveNumWorkers   int
 	serveDatabaseFile string
 	serveDataDir      string
-	serveScriptsDir   string
+	servePluginsDir   string
 )
 
 // serveCmd represents the serve command
@@ -54,7 +54,7 @@ and processes them asynchronously using worker goroutines.`,
 			NumWorkers: serveNumWorkers,
 			QueueSize:  1024,
 			DataDir:    serveDataDir,
-			ScriptsDir: serveScriptsDir,
+			ScriptsDir: servePluginsDir,
 		}, workerStore, logger)
 		if err != nil {
 			return err
@@ -66,7 +66,7 @@ and processes them asynchronously using worker goroutines.`,
 			"num_workers", serveNumWorkers,
 			"db_file", serveDatabaseFile,
 			"data_dir", serveDataDir,
-			"scripts_dir", serveScriptsDir,
+			"scripts_dir", servePluginsDir,
 		)
 
 		if err := w.Run(ctx); err != nil && !errors.Is(err, ctx.Err()) {
@@ -84,5 +84,5 @@ func init() {
 	serveCmd.Flags().IntVar(&serveNumWorkers, "num-workers", 1, "number of concurrent workers")
 	serveCmd.Flags().StringVar(&serveDatabaseFile, "db-file", ":memory:", "database file for worker store, (:memory: for memory only)")
 	serveCmd.Flags().StringVar(&serveDataDir, "data-dir", "data", "directory for task data")
-	serveCmd.Flags().StringVar(&serveScriptsDir, "scripts-dir", "scripts", "directory for scripts")
+	serveCmd.Flags().StringVar(&servePluginsDir, "pluigins-dir", "./plugins", "directory for plugins")
 }
