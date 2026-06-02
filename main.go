@@ -24,7 +24,6 @@ func main() {
 		from        string
 		to          string
 		state       string
-		reportEvery int
 	)
 
 	rootCmd := &cobra.Command{
@@ -47,7 +46,6 @@ func main() {
 				args[0],
 				store.Policy(policy),
 				tableFlag, measurement, from, to, state,
-				time.Duration(reportEvery)*time.Second,
 			)
 		},
 	}
@@ -58,7 +56,6 @@ func main() {
 	irisResultsCmd.Flags().StringVar(&from, "from", "", "Start date, RFC3339 (mode 3)")
 	irisResultsCmd.Flags().StringVar(&to, "to", "", "End date, RFC3339 (mode 3)")
 	irisResultsCmd.Flags().StringVar(&state, "state", "finished", "Measurement state filter for mode 3 (default: finished)")
-	irisResultsCmd.Flags().IntVar(&reportEvery, "report-every", 5, "Progress report interval in seconds (0 to disable)")
 
 	fetchCmd.AddCommand(irisResultsCmd)
 	rootCmd.AddCommand(fetchCmd)
@@ -69,7 +66,7 @@ func main() {
 	}
 }
 
-func runIrisResults(destTable string, policy store.Policy, tableFlag, measurement, fromStr, toStr, stateStr string, reportEvery time.Duration) error {
+func runIrisResults(destTable string, policy store.Policy, tableFlag, measurement, fromStr, toStr, stateStr string) error {
 	// ── Validate flags ────────────────────────────────────────────────────────
 	modes := 0
 	if tableFlag != "" {
@@ -170,7 +167,7 @@ func runIrisResults(destTable string, policy store.Policy, tableFlag, measuremen
 
 	// ── Fetch and write ───────────────────────────────────────────────────────
 	for _, sourceTable := range sourceTables {
-		if err := fetchAndWrite(irisClient, s, sourceTable, dest, schema, policy, reportEvery); err != nil {
+		if err := fetchAndWrite(irisClient, s, sourceTable, dest, schema, policy); err != nil {
 			return fmt.Errorf("failed to write table %s: %w", sourceTable, err)
 		}
 	}
@@ -180,7 +177,7 @@ func runIrisResults(destTable string, policy store.Policy, tableFlag, measuremen
 
 // fetchAndWrite fetches a source table in chunks and writes to dest.
 // The first chunk applies the policy; subsequent chunks always append.
-func fetchAndWrite(irisClient *iris.IrisClient, s *store.Store, sourceTable string, dest store.DestTable, schema string, policy store.Policy, reportEvery time.Duration) error {
+func fetchAndWrite(irisClient *iris.IrisClient, s *store.Store, sourceTable string, dest store.DestTable, schema string, policy store.Policy) error {
 	total, err := countSourceRows(irisClient, sourceTable)
 	if err != nil {
 		return fmt.Errorf("failed to count rows: %w", err)
@@ -207,8 +204,7 @@ func fetchAndWrite(irisClient *iris.IrisClient, s *store.Store, sourceTable stri
 			thisChunk = remaining
 		}
 
-		fmt.Printf("  chunk %d/%d (offset: %s, size: %s)\n",
-			i+1, chunks, store.FormatCount(offset), store.FormatCount(thisChunk))
+		fmt.Printf("  chunk %d/%d\n", i+1, chunks)
 
 		sql := fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d", sourceTable, chunkSize, offset)
 		rows, err := irisClient.Query().Select(sql).Json()
@@ -216,7 +212,7 @@ func fetchAndWrite(irisClient *iris.IrisClient, s *store.Store, sourceTable stri
 			return fmt.Errorf("chunk %d: failed to query: %w", i+1, err)
 		}
 
-		if err := s.Put(chunkPolicy, dest, schema, rows, thisChunk, reportEvery); err != nil {
+		if err := s.Put(chunkPolicy, dest, schema, rows, thisChunk); err != nil {
 			return fmt.Errorf("chunk %d: failed to write: %w", i+1, err)
 		}
 	}
