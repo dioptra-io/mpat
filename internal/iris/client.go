@@ -322,6 +322,7 @@ func (q *SelectQuery) execute(format clickhouseFormat) (io.ReadCloser, error) {
 	params.Set("query", sql)
 	params.Set("database", creds.Database)
 	params.Set("enable_http_compression", "1")
+	params.Set("max_execution_time", "3600") // 1 hour
 
 	u := creds.BaseURL + "?" + params.Encode()
 
