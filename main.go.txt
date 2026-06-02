@@ -1,0 +1,67 @@
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/spf13/cobra"
+)
+
+type Policy string
+
+const (
+	PolicyReplace  Policy = "replace"
+	PolicyTruncate Policy = "truncate"
+	PolicyFail     Policy = "fail"
+	PolicyAppend   Policy = "append"
+)
+
+func main() {
+	var policy string
+
+	rootCmd := &cobra.Command{
+		Use:   "mp",
+		Short: "Measurement Platform Analysis Tool",
+	}
+
+	fetchCmd := &cobra.Command{
+		Use:   "fetch",
+		Short: "Fetch data from a source",
+	}
+
+	irisResultsCmd := &cobra.Command{
+		Use:   "iris-results [source-table-name]",
+		Short: "Fetch iris results from a source table",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			sourceTable := args[0]
+			return runIrisResults(sourceTable, Policy(policy))
+		},
+	}
+
+	irisResultsCmd.Flags().StringVar(&policy, "policy", "fail", "Write policy: replace, truncate, fail, append")
+
+	fetchCmd.AddCommand(irisResultsCmd)
+	rootCmd.AddCommand(fetchCmd)
+
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func runIrisResults(sourceTable string, policy Policy) error {
+	switch policy {
+	case PolicyReplace:
+		fmt.Printf("Dropping destination table if exists, then fetching from %s\n", sourceTable)
+	case PolicyTruncate:
+		fmt.Printf("Truncating destination table if not empty, then fetching from %s\n", sourceTable)
+	case PolicyFail:
+		fmt.Printf("Failing if destination table is not empty, then fetching from %s\n", sourceTable)
+	case PolicyAppend:
+		fmt.Printf("Appending to destination table from %s\n", sourceTable)
+	default:
+		return fmt.Errorf("unknown policy %q: must be one of replace, truncate, fail, append", policy)
+	}
+	return nil
+}
