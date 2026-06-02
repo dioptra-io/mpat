@@ -116,7 +116,7 @@ func NewStore(cfg StoreConfig) (*Store, error) {
 	return &Store{
 		conn:       conn,
 		config:     cfg,
-		httpClient: &http.Client{Timeout: 5 * time.Minute},
+		httpClient: &http.Client{Timeout: 0},
 		httpDSN: &dsn{
 			host:     host,
 			database: database,
