@@ -3,6 +3,7 @@ package iris
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -14,6 +15,8 @@ const (
 	defaultEndpoint = "https://api.iris.dioptra.io"
 	pageLimit       = 200
 )
+
+// ── Config ───────────────────────────────────────────────────────────────────
 
 type Config struct {
 	Username string
@@ -28,10 +31,13 @@ func (c *Config) endpoint() string {
 	return strings.TrimRight(c.Endpoint, "/")
 }
 
+// ── Client ───────────────────────────────────────────────────────────────────
+
 type IrisClient struct {
-	config Config
-	http   *http.Client
-	token  string
+	config   Config
+	http     *http.Client
+	token    string
+	services *ExternalServices // cached ClickHouse/S3 credentials
 }
 
 // NewIrisClient creates a new IrisClient and immediately logs in to obtain a token.
@@ -51,6 +57,8 @@ func NewIrisClient(cfg Config) (*IrisClient, error) {
 	}
 	return c, nil
 }
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
 
 // Login authenticates with the Iris API and stores the JWT token in memory.
 func (c *IrisClient) Login() error {
@@ -96,17 +104,38 @@ func (c *IrisClient) Logout() error {
 	defer resp.Body.Close()
 
 	c.token = ""
+	c.services = nil
 	return nil
 }
 
+// ── Services ─────────────────────────────────────────────────────────────────
+
 // Services returns the external service credentials (ClickHouse, S3).
+// Results are cached and refreshed automatically when expired.
 func (c *IrisClient) Services() (ExternalServices, error) {
+	if c.services != nil && time.Now().Before(c.services.ClickHouseExpirationTime.Time) {
+		return *c.services, nil
+	}
+
 	var services ExternalServices
 	if err := c.get("/users/me/services", nil, &services); err != nil {
 		return ExternalServices{}, fmt.Errorf("iris: failed to get services: %w", err)
 	}
+
+	c.services = &services
 	return services, nil
 }
+
+// clickhouseCredentials returns valid ClickHouse credentials, refreshing if needed.
+func (c *IrisClient) clickhouseCredentials() (ClickHouseCredentials, error) {
+	svc, err := c.Services()
+	if err != nil {
+		return ClickHouseCredentials{}, err
+	}
+	return svc.ClickHouse, nil
+}
+
+// ── Measurement Query Builder ─────────────────────────────────────────────────
 
 // MeasurementQueryBuilder builds and executes a filtered measurement list query.
 type MeasurementQueryBuilder struct {
@@ -225,6 +254,97 @@ func (c *IrisClient) fetchAllMeasurements(state MeasurementAgentState, cutoff *t
 
 	return all, nil
 }
+
+// ── ClickHouse Query Builder ──────────────────────────────────────────────────
+
+// clickhouseFormat represents a ClickHouse output format.
+type clickhouseFormat string
+
+const (
+	formatRaw  clickhouseFormat = ""
+	formatJSON clickhouseFormat = "JSONEachRow"
+	formatCSV  clickhouseFormat = "CSVWithNames"
+)
+
+// QueryBuilder is created by client.Query() and holds a reference to the client.
+type QueryBuilder struct {
+	client *IrisClient
+}
+
+// Query returns a new QueryBuilder for executing ClickHouse queries.
+func (c *IrisClient) Query() *QueryBuilder {
+	return &QueryBuilder{client: c}
+}
+
+// Select sets the SQL query and returns a SelectQuery ready to execute.
+func (q *QueryBuilder) Select(sql string) *SelectQuery {
+	return &SelectQuery{
+		client: q.client,
+		sql:    sql,
+	}
+}
+
+// SelectQuery holds a SQL query and executes it against ClickHouse.
+type SelectQuery struct {
+	client *IrisClient
+	sql    string
+}
+
+// Raw executes the query and returns the raw ClickHouse response body.
+func (q *SelectQuery) Raw() (io.ReadCloser, error) {
+	return q.execute(formatRaw)
+}
+
+// Json executes the query with FORMAT JSONEachRow and returns the response body.
+func (q *SelectQuery) Json() (io.ReadCloser, error) {
+	return q.execute(formatJSON)
+}
+
+// Csv executes the query with FORMAT CSVWithNames and returns the response body.
+func (q *SelectQuery) Csv() (io.ReadCloser, error) {
+	return q.execute(formatCSV)
+}
+
+// execute fires the query against ClickHouse with the given format appended.
+func (q *SelectQuery) execute(format clickhouseFormat) (io.ReadCloser, error) {
+	creds, err := q.client.clickhouseCredentials()
+	if err != nil {
+		return nil, fmt.Errorf("iris: failed to get clickhouse credentials: %w", err)
+	}
+
+	sql := q.sql
+	if format != formatRaw {
+		sql = fmt.Sprintf("%s FORMAT %s", strings.TrimRight(sql, " \t\n;"), format)
+	}
+
+	params := url.Values{}
+	params.Set("query", sql)
+	params.Set("database", creds.Database)
+
+	u := creds.BaseURL + "?" + params.Encode()
+
+	req, err := http.NewRequest(http.MethodGet, u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("iris: failed to build clickhouse request: %w", err)
+	}
+	req.SetBasicAuth(creds.Username, creds.Password)
+
+	resp, err := q.client.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("iris: clickhouse request failed: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("iris: clickhouse error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	// resp.Body is returned directly — caller is responsible for closing it.
+	return resp.Body, nil
+}
+
+// ── HTTP Helpers ─────────────────────────────────────────────────────────────
 
 // get performs an authenticated GET request and decodes the JSON response.
 // On a 401 it re-logs in once and retries.

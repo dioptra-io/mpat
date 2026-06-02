@@ -7,35 +7,81 @@ import (
 	"time"
 
 	"github.com/dioptra-io/ufuk-research/internal/iris"
+	"github.com/dioptra-io/ufuk-research/internal/store"
 )
 
 func main() {
-	client, err := iris.NewIrisClient(iris.Config{
+	// ── Iris client ───────────────────────────────────────────────────────────
+	irisClient, err := iris.NewIrisClient(iris.Config{
 		Username: mustEnv("IRIS_USERNAME"),
 		Password: mustEnv("IRIS_PASSWORD"),
 		Endpoint: envOr("IRIS_ENDPOINT", ""),
 	})
 	if err != nil {
-		log.Fatalf("failed to create client: %v", err)
+		log.Fatalf("failed to create iris client: %v", err)
 	}
-	defer client.Logout()
+	defer irisClient.Logout()
+	fmt.Println("==> Iris client ready")
 
-	measurements, err := client.Measurements().
-		Between(time.Now().AddDate(0, 0, -2), time.Now()).
+	// ── Store ─────────────────────────────────────────────────────────────────
+	s, err := store.NewStore(store.StoreConfig{
+		ConnectionString: mustEnv("MPAT_CLICKHOUSE"),
+	})
+	if err != nil {
+		log.Fatalf("failed to create store: %v", err)
+	}
+	fmt.Println("==> Store ready")
+
+	// ── Pick the first finished measurement with at least one agent ───────────
+	measurements, err := irisClient.Measurements().
+		State(iris.StateFinished).
+		Between(time.Now().AddDate(0, 0, -1), time.Now()).
 		Fetch()
 	if err != nil {
 		log.Fatalf("failed to fetch measurements: %v", err)
 	}
+	fmt.Printf("==> Found %d finished measurements\n", len(measurements))
 
-	fmt.Printf("found %d measurements in the last 2 days\n\n", len(measurements))
+	var sourceTable string
 	for _, m := range measurements {
-		fmt.Printf("%s  %-12s  %-14s  %s\n",
-			m.CreationTime.Time.Format(time.RFC3339),
-			m.State,
-			m.Tool,
-			m.UUID,
-		)
+		groups := iris.TableGroupsForMeasurement(m)
+		if len(groups) > 0 {
+			sourceTable = groups[0].Results.TableName
+			fmt.Printf("==> Using source table: %s\n", sourceTable)
+			break
+		}
 	}
+	if sourceTable == "" {
+		log.Fatalf("no source table found")
+	}
+
+	// ── Destination ───────────────────────────────────────────────────────────
+	dest := store.DestTable{
+		Database: "mpat",
+		Table:    "test_results",
+	}
+
+	schema, err := store.ResultsDDL(dest)
+	if err != nil {
+		log.Fatalf("failed to render schema: %v", err)
+	}
+
+	// ── Fetch rows from Iris ──────────────────────────────────────────────────
+	fmt.Printf("==> Querying source table...\n")
+	rows, err := irisClient.Query().
+		Select(fmt.Sprintf("SELECT * FROM %s LIMIT 100", sourceTable)).
+		Json()
+	if err != nil {
+		log.Fatalf("failed to query source table: %v", err)
+	}
+
+	// ── Write to local ClickHouse ─────────────────────────────────────────────
+	fmt.Printf("==> Writing to %s.%s (policy: replace)...\n", dest.Database, dest.Table)
+	if err := s.Put(store.PolicyReplace, dest, schema, rows); err != nil {
+		log.Fatalf("failed to put rows: %v", err)
+	}
+
+	fmt.Println("==> Done!")
 }
 
 func mustEnv(key string) string {
