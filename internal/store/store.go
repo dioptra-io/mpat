@@ -211,7 +211,7 @@ func (s *Store) put(policy Policy, dest DestTable, schema string, rows io.ReadCl
 
 // rowCount returns the number of rows in dest, or 0 if the table does not exist.
 func (s *Store) rowCount(ctx context.Context, dest DestTable) (uint64, error) {
-	var exists uint8
+	var exists uint64
 	err := s.conn.QueryRow(ctx,
 		"SELECT count() FROM system.tables WHERE database = ? AND name = ?",
 		dest.Database, dest.Table,
