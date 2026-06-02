@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync/atomic"
 	"text/template"
 	"time"
 
@@ -143,18 +144,22 @@ func ResultsDDL(dest DestTable) (string, error) {
 // ── Put ──────────────────────────────────────────────────────────────────────
 
 // Put writes a JSONEachRow stream into dest according to the given policy.
-func (s *Store) Put(policy Policy, dest DestTable, schema string, rows io.ReadCloser) error {
-	return s.put(policy, dest, schema, rows, FormatJSON)
+// total is the expected number of rows (used for progress reporting).
+// reportEvery controls how often progress is printed; 0 disables reporting.
+func (s *Store) Put(policy Policy, dest DestTable, schema string, rows io.ReadCloser, total int64, reportEvery time.Duration) error {
+	return s.put(policy, dest, schema, rows, FormatJSON, total, reportEvery)
 }
 
 // PutRowBinary writes a RowBinaryWithNamesAndTypes stream into dest according to the given policy.
 // More efficient than Put for large tables — no JSON parsing overhead on either side.
-func (s *Store) PutRowBinary(policy Policy, dest DestTable, schema string, rows io.ReadCloser) error {
-	return s.put(policy, dest, schema, rows, FormatRowBinary)
+// total is the expected number of rows (used for progress reporting).
+// reportEvery controls how often progress is printed; 0 disables reporting.
+func (s *Store) PutRowBinary(policy Policy, dest DestTable, schema string, rows io.ReadCloser, total int64, reportEvery time.Duration) error {
+	return s.put(policy, dest, schema, rows, FormatRowBinary, total, reportEvery)
 }
 
 // put is the shared implementation for Put and PutRowBinary.
-func (s *Store) put(policy Policy, dest DestTable, schema string, rows io.ReadCloser, format insertFormat) error {
+func (s *Store) put(policy Policy, dest DestTable, schema string, rows io.ReadCloser, format insertFormat, total int64, reportEvery time.Duration) error {
 	defer rows.Close()
 
 	ctx := context.Background()
@@ -204,7 +209,94 @@ func (s *Store) put(policy Policy, dest DestTable, schema string, rows io.ReadCl
 		return fmt.Errorf("store: unknown policy %q", policy)
 	}
 
-	return s.insert(dest, rows, format)
+	return s.insert(dest, rows, format, total, reportEvery)
+}
+
+// ── Newline counting reader ───────────────────────────────────────────────────
+
+// rowCountingReader wraps an io.Reader and counts newlines as they pass through.
+// Each newline in JSONEachRow corresponds to one row.
+type rowCountingReader struct {
+	r       io.Reader
+	counter *atomic.Int64
+}
+
+func (r *rowCountingReader) Read(p []byte) (n int, err error) {
+	n, err = r.r.Read(p)
+	for i := 0; i < n; i++ {
+		if p[i] == '\n' {
+			r.counter.Add(1)
+		}
+	}
+	return
+}
+
+// ── Progress reporting ────────────────────────────────────────────────────────
+
+// progressReporter reads from counter and prints stats every interval.
+// Runs in a goroutine; stops when done is closed.
+func progressReporter(counter *atomic.Int64, total int64, interval time.Duration, start time.Time, done <-chan struct{}) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			printProgress(counter.Load(), total, start)
+		}
+	}
+}
+
+func printProgress(fetched, total int64, start time.Time) {
+	elapsed := time.Since(start)
+	elapsedSec := elapsed.Seconds()
+
+	var (
+		pct        float64
+		rowsPerSec float64
+		remaining  time.Duration
+		eta        string
+	)
+
+	if elapsedSec > 0 {
+		rowsPerSec = float64(fetched) / elapsedSec
+	}
+	if total > 0 {
+		pct = float64(fetched) / float64(total) * 100
+	}
+	if rowsPerSec > 0 && total > fetched {
+		remainingSec := float64(total-fetched) / rowsPerSec
+		remaining = time.Duration(remainingSec) * time.Second
+		eta = time.Now().Add(remaining).Format("Jan 2, 3:04pm")
+	} else {
+		eta = "N/A"
+	}
+
+	fmt.Printf(
+		"  rows: %s / %s (%.1f%%) | %.0f rows/s | elapsed: %s | remaining: ~%s | ETA: %s\n",
+		FormatCount(fetched),
+		FormatCount(total),
+		pct,
+		rowsPerSec,
+		elapsed.Round(time.Second),
+		remaining.Round(time.Second),
+		eta,
+	)
+}
+
+// FormatCount formats an integer with thousands separators.
+func FormatCount(n int64) string {
+	s := fmt.Sprintf("%d", n)
+	out := make([]byte, 0, len(s)+len(s)/3)
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			out = append(out, ',')
+		}
+		out = append(out, byte(c))
+	}
+	return string(out)
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -240,8 +332,8 @@ func (s *Store) exec(ctx context.Context, query string) error {
 
 // insert streams rows directly into ClickHouse via HTTP POST.
 // If the stream is gzip-compressed, it is decompressed transparently before sending.
-// The format must match what the caller used to produce the stream.
-func (s *Store) insert(dest DestTable, rows io.Reader, format insertFormat) error {
+// Progress is tracked by counting newlines passing through the stream.
+func (s *Store) insert(dest DestTable, rows io.Reader, format insertFormat, total int64, reportEvery time.Duration) error {
 	query := fmt.Sprintf("INSERT INTO %s.%s FORMAT %s", dest.Database, dest.Table, format)
 
 	params := url.Values{}
@@ -268,7 +360,19 @@ func (s *Store) insert(dest DestTable, rows io.Reader, format insertFormat) erro
 		body = gz
 	}
 
-	req, err := http.NewRequest(http.MethodPost, u, body)
+	// Wrap body in a newline-counting reader for progress tracking.
+	var counter atomic.Int64
+	counted := &rowCountingReader{r: body, counter: &counter}
+
+	// Start progress reporter goroutine if enabled.
+	start := time.Now()
+	if reportEvery > 0 && total > 0 {
+		done := make(chan struct{})
+		defer close(done)
+		go progressReporter(&counter, total, reportEvery, start, done)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, u, counted)
 	if err != nil {
 		return fmt.Errorf("store: failed to build insert request: %w", err)
 	}

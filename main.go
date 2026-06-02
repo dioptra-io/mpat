@@ -1,7 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -18,6 +22,7 @@ func main() {
 		from        string
 		to          string
 		state       string
+		reportEvery int
 	)
 
 	rootCmd := &cobra.Command{
@@ -36,7 +41,12 @@ func main() {
 		Short: "Fetch iris results into a destination table",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runIrisResults(args[0], store.Policy(policy), tableFlag, measurement, from, to, state)
+			return runIrisResults(
+				args[0],
+				store.Policy(policy),
+				tableFlag, measurement, from, to, state,
+				time.Duration(reportEvery)*time.Second,
+			)
 		},
 	}
 
@@ -46,6 +56,7 @@ func main() {
 	irisResultsCmd.Flags().StringVar(&from, "from", "", "Start date, RFC3339 (mode 3)")
 	irisResultsCmd.Flags().StringVar(&to, "to", "", "End date, RFC3339 (mode 3)")
 	irisResultsCmd.Flags().StringVar(&state, "state", "finished", "Measurement state filter for mode 3 (default: finished)")
+	irisResultsCmd.Flags().IntVar(&reportEvery, "report-every", 5, "Progress report interval in seconds (0 to disable)")
 
 	fetchCmd.AddCommand(irisResultsCmd)
 	rootCmd.AddCommand(fetchCmd)
@@ -56,7 +67,7 @@ func main() {
 	}
 }
 
-func runIrisResults(destTable string, policy store.Policy, tableFlag, measurement, fromStr, toStr, stateStr string) error {
+func runIrisResults(destTable string, policy store.Policy, tableFlag, measurement, fromStr, toStr, stateStr string, reportEvery time.Duration) error {
 	// ── Validate flags ────────────────────────────────────────────────────────
 	modes := 0
 	if tableFlag != "" {
@@ -157,7 +168,14 @@ func runIrisResults(destTable string, policy store.Policy, tableFlag, measuremen
 
 	// ── Fetch and write ───────────────────────────────────────────────────────
 	for _, sourceTable := range sourceTables {
-		fmt.Printf("fetching %s → %s.%s (policy: %s)\n", sourceTable, dest.Database, dest.Table, policy)
+		// Get total row count from Iris for progress reporting.
+		total, err := countSourceRows(irisClient, sourceTable)
+		if err != nil {
+			return fmt.Errorf("failed to count rows in source table %s: %w", sourceTable, err)
+		}
+
+		fmt.Printf("fetching %s → %s.%s (policy: %s, total: %s rows)\n",
+			sourceTable, dest.Database, dest.Table, policy, store.FormatCount(total))
 
 		rows, err := irisClient.Query().
 			Select(fmt.Sprintf("SELECT * FROM %s", sourceTable)).
@@ -166,7 +184,7 @@ func runIrisResults(destTable string, policy store.Policy, tableFlag, measuremen
 			return fmt.Errorf("failed to query source table %s: %w", sourceTable, err)
 		}
 
-		if err := s.Put(policy, dest, schema, rows); err != nil {
+		if err := s.Put(policy, dest, schema, rows, total, reportEvery); err != nil {
 			return fmt.Errorf("failed to write table %s: %w", sourceTable, err)
 		}
 
@@ -174,6 +192,49 @@ func runIrisResults(destTable string, policy store.Policy, tableFlag, measuremen
 	}
 
 	return nil
+}
+
+// countSourceRows queries the row count of a source table on Iris.
+func countSourceRows(client *iris.IrisClient, sourceTable string) (int64, error) {
+	r, err := client.Query().
+		Select(fmt.Sprintf("SELECT count() AS count FROM %s", sourceTable)).
+		Json()
+	if err != nil {
+		return 0, err
+	}
+	defer r.Close()
+
+	// Response may be gzip-compressed — decompress transparently.
+	reader, err := decompressIfNeeded(r)
+	if err != nil {
+		return 0, fmt.Errorf("failed to decompress count response: %w", err)
+	}
+
+	var result struct {
+		Count int64 `json:"count"`
+	}
+	if err := json.NewDecoder(reader).Decode(&result); err != nil {
+		return 0, fmt.Errorf("failed to decode count response: %w", err)
+	}
+	return result.Count, nil
+}
+
+// decompressIfNeeded detects gzip magic bytes and wraps the reader if needed.
+func decompressIfNeeded(r io.ReadCloser) (io.Reader, error) {
+	buf := make([]byte, 2)
+	n, err := io.ReadFull(r, buf)
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return nil, err
+	}
+	peeked := io.MultiReader(bytes.NewReader(buf[:n]), r)
+	if n == 2 && buf[0] == 0x1f && buf[1] == 0x8b {
+		gz, err := gzip.NewReader(peeked)
+		if err != nil {
+			return nil, err
+		}
+		return gz, nil
+	}
+	return peeked, nil
 }
 
 func mustEnv(key string) string {
