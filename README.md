@@ -148,12 +148,9 @@ total: 147 chunks across 2 table(s)
 
 ---
 
-## Contributors
+## Maintainers
 
-- Ufuk Bombar – Sorbonne Université / LINCS
-- Timur Friedman – Sorbonne Université / LINCS
-- Olivier Fourmaux – Sorbonne Université
-- Kevin Vermeulen – LAAS-CNRS
+- Ufuk Bombar – Sorbonne Université / LINCS · [contact@bombar.dev](mailto:contact@bombar.dev)
 
 ---
 
