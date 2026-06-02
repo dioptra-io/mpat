@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sync/atomic"
 	"text/template"
 	"time"
 
@@ -144,20 +143,17 @@ func ResultsDDL(dest DestTable) (string, error) {
 // ── Put ──────────────────────────────────────────────────────────────────────
 
 // Put writes a JSONEachRow stream into dest according to the given policy.
-// total is the expected number of rows (used for progress reporting).
-func (s *Store) Put(policy Policy, dest DestTable, schema string, rows io.ReadCloser, total int64, chunkInfo string) error {
-	return s.put(policy, dest, schema, rows, FormatJSON, total, chunkInfo)
+func (s *Store) Put(policy Policy, dest DestTable, schema string, rows io.ReadCloser) error {
+	return s.put(policy, dest, schema, rows, FormatJSON)
 }
 
 // PutRowBinary writes a RowBinaryWithNamesAndTypes stream into dest according to the given policy.
-// More efficient than Put for large tables — no JSON parsing overhead on either side.
-// total is the expected number of rows (used for progress reporting).
-func (s *Store) PutRowBinary(policy Policy, dest DestTable, schema string, rows io.ReadCloser, total int64, chunkInfo string) error {
-	return s.put(policy, dest, schema, rows, FormatRowBinary, total, chunkInfo)
+func (s *Store) PutRowBinary(policy Policy, dest DestTable, schema string, rows io.ReadCloser) error {
+	return s.put(policy, dest, schema, rows, FormatRowBinary)
 }
 
 // put is the shared implementation for Put and PutRowBinary.
-func (s *Store) put(policy Policy, dest DestTable, schema string, rows io.ReadCloser, format insertFormat, total int64, chunkInfo string) error {
+func (s *Store) put(policy Policy, dest DestTable, schema string, rows io.ReadCloser, format insertFormat) error {
 	defer rows.Close()
 
 	ctx := context.Background()
@@ -207,95 +203,10 @@ func (s *Store) put(policy Policy, dest DestTable, schema string, rows io.ReadCl
 		return fmt.Errorf("store: unknown policy %q", policy)
 	}
 
-	return s.insert(dest, rows, format, total, chunkInfo)
+	return s.insert(dest, rows, format)
 }
 
-// ── Newline counting reader ───────────────────────────────────────────────────
-
-// rowCountingReader wraps an io.Reader and counts newlines as they pass through.
-// Each newline in JSONEachRow corresponds to one row.
-type rowCountingReader struct {
-	r       io.Reader
-	counter *atomic.Int64
-}
-
-func (r *rowCountingReader) Read(p []byte) (n int, err error) {
-	n, err = r.r.Read(p)
-	for i := 0; i < n; i++ {
-		if p[i] == '\n' {
-			r.counter.Add(1)
-		}
-	}
-	return
-}
-
-// ── Progress reporting ────────────────────────────────────────────────────────
-
-const ewmaAlpha = 0.2
-
-// progressReporter reads from counter and prints stats every interval.
-// Uses EWMA (alpha=0.2) to smooth the rows/sec estimate.
-// Runs in a goroutine; stops when done is closed.
-func progressReporter(counter *atomic.Int64, total int64, interval time.Duration, start time.Time, chunkInfo string, done <-chan struct{}) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	var (
-		ewmaRate    float64
-		lastFetched int64
-	)
-
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			fetched := counter.Load()
-			delta := fetched - lastFetched
-			lastFetched = fetched
-
-			currentRate := float64(delta) / interval.Seconds()
-			if ewmaRate == 0 {
-				ewmaRate = currentRate
-			} else {
-				ewmaRate = ewmaAlpha*currentRate + (1-ewmaAlpha)*ewmaRate
-			}
-
-			printProgress(chunkInfo, fetched, total, ewmaRate, time.Since(start))
-		}
-	}
-}
-
-func printProgress(chunkInfo string, fetched, total int64, ewmaRate float64, elapsed time.Duration) {
-	var (
-		pct       float64
-		remaining time.Duration
-		eta       string
-	)
-
-	if total > 0 {
-		pct = float64(fetched) / float64(total) * 100
-	}
-	if ewmaRate > 0 && total > fetched {
-		remainingSec := float64(total-fetched) / ewmaRate
-		remaining = time.Duration(remainingSec) * time.Second
-		eta = time.Now().Add(remaining).Format("Jan 2, 3:04pm")
-	} else {
-		eta = "N/A"
-	}
-
-	fmt.Printf(
-		"  %s | rows: %s / %s (%.1f%%) | %.0f rows/s | elapsed: %s | remaining: ~%s | ETA: %s\n",
-		chunkInfo,
-		FormatCount(fetched),
-		FormatCount(total),
-		pct,
-		ewmaRate,
-		elapsed.Round(time.Second),
-		remaining.Round(time.Second),
-		eta,
-	)
-}
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 // FormatCount formats an integer with thousands separators.
 func FormatCount(n int64) string {
@@ -309,8 +220,6 @@ func FormatCount(n int64) string {
 	}
 	return string(out)
 }
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
 
 // rowCount returns the number of rows in dest, or 0 if the table does not exist.
 func (s *Store) rowCount(ctx context.Context, dest DestTable) (uint64, error) {
@@ -343,8 +252,7 @@ func (s *Store) exec(ctx context.Context, query string) error {
 
 // insert streams rows directly into ClickHouse via HTTP POST.
 // If the stream is gzip-compressed, it is decompressed transparently before sending.
-// Progress is tracked by counting newlines passing through the stream.
-func (s *Store) insert(dest DestTable, rows io.Reader, format insertFormat, total int64, chunkInfo string) error {
+func (s *Store) insert(dest DestTable, rows io.Reader, format insertFormat) error {
 	query := fmt.Sprintf("INSERT INTO %s.%s FORMAT %s", dest.Database, dest.Table, format)
 
 	params := url.Values{}
@@ -374,19 +282,7 @@ func (s *Store) insert(dest DestTable, rows io.Reader, format insertFormat, tota
 		body = gz
 	}
 
-	// Wrap body in a newline-counting reader for progress tracking.
-	var counter atomic.Int64
-	counted := &rowCountingReader{r: body, counter: &counter}
-
-	// Start progress reporter goroutine if enabled.
-	start := time.Now()
-	if total > 0 {
-		done := make(chan struct{})
-		defer close(done)
-		go progressReporter(&counter, total, 5*time.Second, start, chunkInfo, done)
-	}
-
-	req, err := http.NewRequest(http.MethodPost, u, counted)
+	req, err := http.NewRequest(http.MethodPost, u, body)
 	if err != nil {
 		return fmt.Errorf("store: failed to build insert request: %w", err)
 	}

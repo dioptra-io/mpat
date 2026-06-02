@@ -14,7 +14,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const chunkSize = 5_000_000 // 5M rows per chunk
+const (
+	chunkSize = 500_000 // 500k rows per chunk
+	ewmaAlpha = 0.2
+)
 
 func main() {
 	var (
@@ -24,6 +27,7 @@ func main() {
 		from        string
 		to          string
 		state       string
+		tag         string
 	)
 
 	rootCmd := &cobra.Command{
@@ -45,7 +49,7 @@ func main() {
 			return runIrisResults(
 				args[0],
 				store.Policy(policy),
-				tableFlag, measurement, from, to, state,
+				tableFlag, measurement, from, to, state, tag,
 			)
 		},
 	}
@@ -56,6 +60,7 @@ func main() {
 	irisResultsCmd.Flags().StringVar(&from, "from", "", "Start date, RFC3339 (mode 3)")
 	irisResultsCmd.Flags().StringVar(&to, "to", "", "End date, RFC3339 (mode 3)")
 	irisResultsCmd.Flags().StringVar(&state, "state", "finished", "Measurement state filter for mode 3 (default: finished)")
+	irisResultsCmd.Flags().StringVar(&tag, "tag", "", "Tag regex filter for mode 3 (optional)")
 
 	fetchCmd.AddCommand(irisResultsCmd)
 	rootCmd.AddCommand(fetchCmd)
@@ -66,7 +71,14 @@ func main() {
 	}
 }
 
-func runIrisResults(destTable string, policy store.Policy, tableFlag, measurement, fromStr, toStr, stateStr string) error {
+// tableInfo holds pre-scanned metadata for a source table.
+type tableInfo struct {
+	name   string
+	total  int64
+	chunks int64
+}
+
+func runIrisResults(destTable string, policy store.Policy, tableFlag, measurement, fromStr, toStr, stateStr, tagPattern string) error {
 	// ── Validate flags ────────────────────────────────────────────────────────
 	modes := 0
 	if tableFlag != "" {
@@ -115,11 +127,11 @@ func runIrisResults(destTable string, policy store.Policy, tableFlag, measuremen
 	}
 
 	// ── Resolve source tables ─────────────────────────────────────────────────
-	var sourceTables []string
+	var sourceNames []string
 
 	switch {
 	case tableFlag != "":
-		sourceTables = []string{tableFlag}
+		sourceNames = []string{tableFlag}
 
 	case measurement != "":
 		measurements, err := irisClient.Measurements().Fetch()
@@ -129,12 +141,12 @@ func runIrisResults(destTable string, policy store.Policy, tableFlag, measuremen
 		for _, m := range measurements {
 			if m.UUID == measurement {
 				for _, g := range iris.TableGroupsForMeasurement(m) {
-					sourceTables = append(sourceTables, g.Results.TableName)
+					sourceNames = append(sourceNames, g.Results.TableName)
 				}
 				break
 			}
 		}
-		if len(sourceTables) == 0 {
+		if len(sourceNames) == 0 {
 			return fmt.Errorf("no results tables found for measurement %s", measurement)
 		}
 
@@ -151,78 +163,110 @@ func runIrisResults(destTable string, policy store.Policy, tableFlag, measuremen
 		if stateStr != "" {
 			q = q.State(iris.MeasurementAgentState(stateStr))
 		}
+		if tagPattern != "" {
+			q = q.TagContains(tagPattern)
+		}
 		measurements, err := q.Fetch()
 		if err != nil {
 			return fmt.Errorf("failed to fetch measurements: %w", err)
 		}
 		for _, m := range measurements {
 			for _, g := range iris.TableGroupsForMeasurement(m) {
-				sourceTables = append(sourceTables, g.Results.TableName)
+				sourceNames = append(sourceNames, g.Results.TableName)
 			}
 		}
-		if len(sourceTables) == 0 {
+		if len(sourceNames) == 0 {
 			return fmt.Errorf("no results tables found in range %s to %s", fromStr, toStr)
 		}
 	}
 
+	// ── Pre-scan all tables ───────────────────────────────────────────────────
+	fmt.Printf("found %d table(s)   policy: %s\n", len(sourceNames), policy)
+	tables := make([]tableInfo, 0, len(sourceNames))
+	totalChunks := int64(0)
+	for _, name := range sourceNames {
+		total, err := countSourceRows(irisClient, name)
+		if err != nil {
+			return fmt.Errorf("failed to count rows in %s: %w", name, err)
+		}
+		chunks := (total + chunkSize - 1) / chunkSize
+		if chunks == 0 {
+			chunks = 1
+		}
+		tables = append(tables, tableInfo{name: name, total: total, chunks: chunks})
+		totalChunks += chunks
+	}
+	fmt.Printf("total: %d chunks across %d table(s)\n", totalChunks, len(tables))
+
 	// ── Fetch and write ───────────────────────────────────────────────────────
-	for i, sourceTable := range sourceTables {
-		// Only apply the original policy on the first table.
-		// All subsequent tables always append so we don't clobber previous data.
+	var ewmaRate float64
+	globalChunk := int64(0)
+
+	for i, t := range tables {
 		tablePolicy := policy
 		if i > 0 {
 			tablePolicy = store.PolicyAppend
 		}
-		if err := fetchAndWrite(irisClient, s, sourceTable, dest, schema, tablePolicy); err != nil {
-			return fmt.Errorf("failed to write table %s: %w", sourceTable, err)
+
+		fmt.Printf("[%d/%d] %s   %s rows   %d chunks\n",
+			i+1, len(tables), t.name, store.FormatCount(t.total), t.chunks)
+
+		for c := int64(0); c < t.chunks; c++ {
+			offset := c * chunkSize
+			chunkPolicy := store.PolicyAppend
+			if c == 0 {
+				chunkPolicy = tablePolicy
+			}
+
+			globalChunk++
+			chunkRows := int64(chunkSize)
+			if remaining := t.total - offset; remaining < chunkRows {
+				chunkRows = remaining
+			}
+
+			sql := fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d", t.name, chunkSize, offset)
+			rows, err := irisClient.Query().Select(sql).Json()
+			if err != nil {
+				return fmt.Errorf("[%d/%d] chunk %d: failed to query: %w", i+1, len(tables), c+1, err)
+			}
+
+			start := time.Now()
+			if err := s.Put(chunkPolicy, dest, schema, rows); err != nil {
+				return fmt.Errorf("[%d/%d] chunk %d: failed to write: %w", i+1, len(tables), c+1, err)
+			}
+			elapsed := time.Since(start)
+
+			// Update EWMA rate (rows/sec).
+			currentRate := float64(chunkRows) / elapsed.Seconds()
+			if ewmaRate == 0 {
+				ewmaRate = currentRate
+			} else {
+				ewmaRate = ewmaAlpha*currentRate + (1-ewmaAlpha)*ewmaRate
+			}
+
+			// Compute ETA from remaining chunks globally.
+			remainingChunks := totalChunks - globalChunk
+			var eta string
+			if ewmaRate > 0 && remainingChunks > 0 {
+				remainingSec := float64(remainingChunks) * float64(chunkSize) / ewmaRate
+				remaining := time.Duration(remainingSec) * time.Second
+				eta = fmt.Sprintf("%s (in ~%s)",
+					time.Now().Add(remaining).Format("Jan 2, 3:04pm"),
+					remaining.Round(time.Second),
+				)
+			} else {
+				eta = "done"
+			}
+
+			fmt.Printf("      chunk %d/%d/%d   |   %s   |   %.0f rows/s   |   %s\n",
+				c+1, globalChunk, totalChunks,
+				elapsed.Round(time.Second),
+				ewmaRate,
+				eta,
+			)
 		}
 	}
 
-	return nil
-}
-
-// fetchAndWrite fetches a source table in chunks and writes to dest.
-// The first chunk applies the policy; subsequent chunks always append.
-func fetchAndWrite(irisClient *iris.IrisClient, s *store.Store, sourceTable string, dest store.DestTable, schema string, policy store.Policy) error {
-	total, err := countSourceRows(irisClient, sourceTable)
-	if err != nil {
-		return fmt.Errorf("failed to count rows: %w", err)
-	}
-
-	fmt.Printf("fetching %s → %s.%s (policy: %s, total: %s rows)\n",
-		sourceTable, dest.Database, dest.Table, policy, store.FormatCount(total))
-
-	chunks := (total + chunkSize - 1) / chunkSize
-	if chunks == 0 {
-		chunks = 1
-	}
-
-	for i := int64(0); i < chunks; i++ {
-		offset := i * chunkSize
-		chunkPolicy := store.PolicyAppend
-		if i == 0 {
-			chunkPolicy = policy
-		}
-
-		remaining := total - offset
-		thisChunk := int64(chunkSize)
-		if remaining < thisChunk {
-			thisChunk = remaining
-		}
-
-		chunkInfo := fmt.Sprintf("chunk %d/%d", i+1, chunks)
-		sql := fmt.Sprintf("SELECT * FROM %s LIMIT %d OFFSET %d", sourceTable, chunkSize, offset)
-		rows, err := irisClient.Query().Select(sql).Json()
-		if err != nil {
-			return fmt.Errorf("chunk %d: failed to query: %w", i+1, err)
-		}
-
-		if err := s.Put(chunkPolicy, dest, schema, rows, thisChunk, chunkInfo); err != nil {
-			return fmt.Errorf("chunk %d: failed to write: %w", i+1, err)
-		}
-	}
-
-	fmt.Printf("done: %s\n", sourceTable)
 	return nil
 }
 
