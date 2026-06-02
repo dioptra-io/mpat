@@ -145,19 +145,19 @@ func ResultsDDL(dest DestTable) (string, error) {
 
 // Put writes a JSONEachRow stream into dest according to the given policy.
 // total is the expected number of rows (used for progress reporting).
-func (s *Store) Put(policy Policy, dest DestTable, schema string, rows io.ReadCloser, total int64) error {
-	return s.put(policy, dest, schema, rows, FormatJSON, total)
+func (s *Store) Put(policy Policy, dest DestTable, schema string, rows io.ReadCloser, total int64, chunkInfo string) error {
+	return s.put(policy, dest, schema, rows, FormatJSON, total, chunkInfo)
 }
 
 // PutRowBinary writes a RowBinaryWithNamesAndTypes stream into dest according to the given policy.
 // More efficient than Put for large tables — no JSON parsing overhead on either side.
 // total is the expected number of rows (used for progress reporting).
-func (s *Store) PutRowBinary(policy Policy, dest DestTable, schema string, rows io.ReadCloser, total int64) error {
-	return s.put(policy, dest, schema, rows, FormatRowBinary, total)
+func (s *Store) PutRowBinary(policy Policy, dest DestTable, schema string, rows io.ReadCloser, total int64, chunkInfo string) error {
+	return s.put(policy, dest, schema, rows, FormatRowBinary, total, chunkInfo)
 }
 
 // put is the shared implementation for Put and PutRowBinary.
-func (s *Store) put(policy Policy, dest DestTable, schema string, rows io.ReadCloser, format insertFormat, total int64) error {
+func (s *Store) put(policy Policy, dest DestTable, schema string, rows io.ReadCloser, format insertFormat, total int64, chunkInfo string) error {
 	defer rows.Close()
 
 	ctx := context.Background()
@@ -207,7 +207,7 @@ func (s *Store) put(policy Policy, dest DestTable, schema string, rows io.ReadCl
 		return fmt.Errorf("store: unknown policy %q", policy)
 	}
 
-	return s.insert(dest, rows, format, total)
+	return s.insert(dest, rows, format, total, chunkInfo)
 }
 
 // ── Newline counting reader ───────────────────────────────────────────────────
@@ -331,7 +331,7 @@ func (s *Store) exec(ctx context.Context, query string) error {
 // insert streams rows directly into ClickHouse via HTTP POST.
 // If the stream is gzip-compressed, it is decompressed transparently before sending.
 // Progress is tracked by counting newlines passing through the stream.
-func (s *Store) insert(dest DestTable, rows io.Reader, format insertFormat, total int64) error {
+func (s *Store) insert(dest DestTable, rows io.Reader, format insertFormat, total int64, chunkInfo string) error {
 	query := fmt.Sprintf("INSERT INTO %s.%s FORMAT %s", dest.Database, dest.Table, format)
 
 	params := url.Values{}
@@ -370,7 +370,7 @@ func (s *Store) insert(dest DestTable, rows io.Reader, format insertFormat, tota
 	if total > 0 {
 		done := make(chan struct{})
 		defer close(done)
-		go progressReporter(&counter, total, 5*time.Second, start, done)
+		go progressReporter(&counter, total, 5*time.Second, start, chunkInfo, done)
 	}
 
 	req, err := http.NewRequest(http.MethodPost, u, counted)
