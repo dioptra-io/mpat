@@ -1,0 +1,190 @@
+package store
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"log"
+	"text/template"
+	"time"
+
+	_ "embed"
+)
+
+const (
+	defaultChunkSize     = 1_000_000
+	defaultRTTResolution = 0.1
+	zeroCursor           = "::"
+)
+
+//go:embed sql/fies.sql
+var fiesDDLTemplate string
+
+//go:embed sql/fies_insert.sql
+var fiesInsertTemplate string
+
+//go:embed sql/fies_cursor.sql
+var fiesCursorTemplate string
+
+// ── Config ───────────────────────────────────────────────────────────────────
+
+type FiesConfig struct {
+	SourceTable   string
+	ChunkSize     int
+	RTTResolution float64
+}
+
+func DefaultFiesConfig(sourceTable string) FiesConfig {
+	return FiesConfig{
+		SourceTable:   sourceTable,
+		ChunkSize:     defaultChunkSize,
+		RTTResolution: defaultRTTResolution,
+	}
+}
+
+// ── Template data ─────────────────────────────────────────────────────────────
+
+type fiesTemplateData struct {
+	Database      string
+	Table         string
+	SourceTable   string
+	RTTResolution float64
+	ChunkSize     int
+	Cursor        string
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+// CreateFiesTable creates the fies table if it does not exist.
+func (s *Store) CreateFiesTable(ctx context.Context, dest DestTable) error {
+	ddl, err := renderTemplate("fies_ddl", fiesDDLTemplate, fiesTemplateData{
+		Database: dest.Database,
+		Table:    dest.Table,
+	})
+	if err != nil {
+		return fmt.Errorf("fie: failed to render DDL template: %w", err)
+	}
+	if err := s.exec(ctx, ddl); err != nil {
+		return fmt.Errorf("fie: failed to create fies table: %w", err)
+	}
+	return nil
+}
+
+// GenerateFies populates the fies table from the source table using
+// keyset-paginated chunks. It runs sequentially to ensure correct
+// sequence number assignment.
+func (s *Store) GenerateFies(ctx context.Context, dest DestTable, cfg FiesConfig) error {
+	cursor := zeroCursor
+	chunk := 0
+	totalRows := uint64(0)
+	start := time.Now()
+
+	for {
+		chunkStart := time.Now()
+
+		// Count rows before insert.
+		countBefore, err := s.rowCount(ctx, dest)
+		if err != nil {
+			return fmt.Errorf("fie: failed to count rows before chunk %d: %w", chunk, err)
+		}
+
+		// Get the last prefix of this chunk for the next cursor.
+		// Returns empty string when there are no more chunks.
+		lastPrefix, err := s.fiesLastPrefix(ctx, cfg, cursor)
+		if err != nil {
+			return fmt.Errorf("fie: failed to get last prefix for cursor %s: %w", cursor, err)
+		}
+
+		// Empty means no more prefixes — we are done.
+		if lastPrefix == "" {
+			break
+		}
+
+		// Insert the chunk.
+		if err := s.insertFiesChunk(ctx, dest, cfg, cursor); err != nil {
+			return fmt.Errorf("fie: failed to insert chunk %d (cursor=%s): %w", chunk, cursor, err)
+		}
+
+		// Count rows after insert.
+		countAfter, err := s.rowCount(ctx, dest)
+		if err != nil {
+			return fmt.Errorf("fie: failed to count rows after chunk %d: %w", chunk, err)
+		}
+
+		rowsInserted := countAfter - countBefore
+		chunk++
+		totalRows += rowsInserted
+		log.Printf(
+			"[chunk %d] cursor=%-24s last=%-24s rows=%d elapsed=%s total=%d",
+			chunk, cursor, lastPrefix, rowsInserted, time.Since(chunkStart).Round(time.Millisecond), totalRows,
+		)
+
+		cursor = lastPrefix
+	}
+
+	log.Printf("done: %d chunks, %d rows, elapsed=%s", chunk, totalRows, time.Since(start).Round(time.Second))
+	return nil
+}
+
+// ── Private ───────────────────────────────────────────────────────────────────
+
+// fiesLastPrefix returns the last probe_dst_prefix in the current chunk,
+// or empty string if there are no more chunks.
+func (s *Store) fiesLastPrefix(ctx context.Context, cfg FiesConfig, cursor string) (string, error) {
+	query, err := renderTemplate("fies_cursor", fiesCursorTemplate, fiesTemplateData{
+		SourceTable: cfg.SourceTable,
+		ChunkSize:   cfg.ChunkSize,
+		Cursor:      cursor,
+	})
+	if err != nil {
+		return "", fmt.Errorf("fie: failed to render cursor template: %w", err)
+	}
+
+	var lastPrefix string
+	row := s.conn.QueryRow(ctx, query)
+	if err := row.Scan(&lastPrefix); err != nil {
+		// No rows means no more chunks — we are done.
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("fie: failed to scan last prefix: %w", err)
+	}
+	return lastPrefix, nil
+}
+
+// insertFiesChunk runs the INSERT INTO fies SELECT ... for one chunk.
+func (s *Store) insertFiesChunk(ctx context.Context, dest DestTable, cfg FiesConfig, cursor string) error {
+	query, err := renderTemplate("fies_insert", fiesInsertTemplate, fiesTemplateData{
+		Database:      dest.Database,
+		Table:         dest.Table,
+		SourceTable:   cfg.SourceTable,
+		RTTResolution: cfg.RTTResolution,
+		ChunkSize:     cfg.ChunkSize,
+		Cursor:        cursor,
+	})
+	if err != nil {
+		return fmt.Errorf("fie: failed to render insert template: %w", err)
+	}
+
+	if err := s.exec(ctx, query); err != nil {
+		return fmt.Errorf("fie: failed to execute insert: %w", err)
+	}
+
+	return nil
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+func renderTemplate(name, tmpl string, data any) (string, error) {
+	t, err := template.New(name).Parse(tmpl)
+	if err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, data); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
