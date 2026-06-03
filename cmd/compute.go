@@ -21,6 +21,7 @@ func computeCmd() *cobra.Command {
 
 func computeResultsFiesCmd() *cobra.Command {
 	var (
+		policy        string
 		database      string
 		chunkSize     int
 		rttResolution float64
@@ -38,10 +39,12 @@ func computeResultsFiesCmd() *cobra.Command {
 				database,
 				chunkSize,
 				rttResolution,
+				policy,
 			)
 		},
 	}
 
+	cmd.Flags().StringVar(&policy, "policy", "fail", "Write policy: replace, truncate, fail, append")
 	cmd.Flags().StringVar(&database, "database", envOr("MPAT_DATABASE", store.DefaultDatabase), "ClickHouse database name")
 	cmd.Flags().IntVar(&chunkSize, "chunk-size", store.DefaultFIEChunkSize, "Number of destination prefixes per chunk")
 	cmd.Flags().Float64Var(&rttResolution, "rtt-resolution", store.DefaultIrisRTTResolution, "RTT resolution in milliseconds")
@@ -49,7 +52,7 @@ func computeResultsFiesCmd() *cobra.Command {
 	return cmd
 }
 
-func runResultsFies(ctx context.Context, inputTable, outputTable, database string, chunkSize int, rttResolution float64) error {
+func runResultsFies(ctx context.Context, inputTable, outputTable, database string, chunkSize int, rttResolution float64, policy string) error {
 	config, err := store.ConfigFromDSN(mustEnv("MPAT_CLICKHOUSE"))
 	if err != nil {
 		return fmt.Errorf("failed to parse config from DSN: %w", err)
@@ -71,9 +74,12 @@ func runResultsFies(ctx context.Context, inputTable, outputTable, database strin
 		RTTResolution: rttResolution,
 	}
 
-	fmt.Printf("computing fies: %s -> %s.%s\n", inputTable, database, outputTable)
-
-	if err := s.CreateFiesTable(ctx, dest); err != nil {
+	fmt.Printf("computing [results to fies]: %s -> %s.%s\n", inputTable, database, outputTable)
+	fiesSchema, err := store.FIESSchema(dest)
+	if err != nil {
+		return fmt.Errorf("failed to create fies schema: %w", err)
+	}
+	if err := s.HandlePolicy(store.StorePolicy(policy), dest, fiesSchema); err != nil {
 		return fmt.Errorf("failed to create fies table: %w", err)
 	}
 

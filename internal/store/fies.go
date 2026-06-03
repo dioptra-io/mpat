@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
 	"text/template"
 	"time"
 
@@ -53,19 +52,18 @@ type fiesTemplateData struct {
 	Cursor        string
 }
 
-// CreateFiesTable creates the fies table if it does not exist.
-func (s *Store) CreateFiesTable(ctx context.Context, dest DatabaseTable) error {
-	ddl, err := renderTemplate("fies_ddl", fiesDDLTemplate, fiesTemplateData{
-		Database: dest.Database,
-		Table:    dest.Table,
-	})
+func FIESSchema(dest DatabaseTable) (string, error) {
+	tmpl, err := template.New("fies").Parse(fiesDDLTemplate)
 	if err != nil {
-		return fmt.Errorf("fie: failed to render DDL template: %w", err)
+		return "", fmt.Errorf("store: failed to parse fies DDL template: %w", err)
 	}
-	if err := s.Exec(ctx, ddl); err != nil {
-		return fmt.Errorf("fie: failed to create fies table: %w", err)
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, dest); err != nil {
+		return "", fmt.Errorf("store: failed to render fies DDL template: %w", err)
 	}
-	return nil
+
+	return buf.String(), nil
 }
 
 // GenerateFies populates the fies table from the source table using
@@ -112,7 +110,7 @@ func (s *Store) GenerateFies(ctx context.Context, dest DatabaseTable, cfg FiesCo
 		rowsInserted := countAfter - countBefore
 		chunk++
 		totalRows += rowsInserted
-		log.Printf(
+		fmt.Printf(
 			"[chunk %d] cursor=%-24s last=%-24s rows=%d elapsed=%s total=%d",
 			chunk, cursor, lastPrefix, rowsInserted, time.Since(chunkStart).Round(time.Millisecond), totalRows,
 		)
@@ -120,7 +118,7 @@ func (s *Store) GenerateFies(ctx context.Context, dest DatabaseTable, cfg FiesCo
 		cursor = lastPrefix
 	}
 
-	log.Printf("done: %d chunks, %d rows, elapsed=%s", chunk, totalRows, time.Since(start).Round(time.Second))
+	fmt.Printf("done: %d chunks, %d rows, elapsed=%s", chunk, totalRows, time.Since(start).Round(time.Second))
 	return nil
 }
 

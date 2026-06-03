@@ -221,7 +221,10 @@ func runIrisResults(destTable string, policy store.StorePolicy, tableFlag, measu
 			}
 
 			start := time.Now()
-			if err := s.Put(chunkPolicy, dbt, schema, rows); err != nil {
+			if err := s.HandlePolicy(chunkPolicy, dbt, schema); err != nil {
+				return fmt.Errorf("[%d/%d] chunk %d: failed to handle policy: %w", i+1, len(tables), c+1, err)
+			}
+			if err := s.InsertJSONL(dbt, rows); err != nil {
 				return fmt.Errorf("[%d/%d] chunk %d: failed to write: %w", i+1, len(tables), c+1, err)
 			}
 			elapsed := time.Since(start)

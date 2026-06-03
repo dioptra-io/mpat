@@ -128,10 +128,7 @@ func NewStore(config *StoreConfig) (*Store, error) {
 	}, nil
 }
 
-// Put writes a JSONEachRow stream into dest according to the given policy.
-func (s *Store) Put(policy StorePolicy, dest DatabaseTable, schema string, rows io.ReadCloser) error {
-	defer func() { _ = rows.Close() }()
-
+func (s *Store) HandlePolicy(policy StorePolicy, dest DatabaseTable, schema string) error {
 	ctx := context.Background()
 	qualified := fmt.Sprintf("%s.%s", dest.Database, dest.Table)
 
@@ -178,8 +175,7 @@ func (s *Store) Put(policy StorePolicy, dest DatabaseTable, schema string, rows 
 	default:
 		return fmt.Errorf("store: unknown policy %q", policy)
 	}
-
-	return s.insertHTTP(dest, rows)
+	return nil
 }
 
 // RowCount returns the number of rows in dest, or 0 if the table does not exist.
@@ -211,10 +207,10 @@ func (s *Store) Exec(ctx context.Context, query string, args ...any) error {
 	return s.conn.Exec(ctx, query, args...)
 }
 
-// insertHTTP streams rows directly into ClickHouse via HTTP POST.
+// InsertJSONL streams rows directly into ClickHouse via HTTP POST.
 // If the stream is gzip-compressed, it is decompressed transparently before sending.
 // The format is required to be JSONEachRow
-func (s *Store) insertHTTP(dest DatabaseTable, rows io.Reader) error {
+func (s *Store) InsertJSONL(dest DatabaseTable, rows io.Reader) error {
 	query := fmt.Sprintf("INSERT INTO %s.%s FORMAT JSONEachRow", dest.Database, dest.Table)
 
 	params := url.Values{}
