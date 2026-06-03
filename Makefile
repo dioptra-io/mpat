@@ -13,7 +13,7 @@ help:
 
 build:
 	go build -ldflags "-X main.Version=$(VERSION) -X main.GitCommit=$(GIT_COMMIT)" \
-		-o mp main.go
+		-o mp ./cmd
 
 test:
 	go test ./...

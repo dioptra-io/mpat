@@ -168,7 +168,7 @@ var AllTableKinds = []IrisTableKind{
 	TableKindProbes,
 }
 
-type IrisResultTable struct {
+type IrisTable struct {
 	Kind            IrisTableKind
 	TableName       string
 	MeasurementUUID string
@@ -180,10 +180,10 @@ type IrisTableGroup struct {
 	MeasurementUUID string
 	AgentUUID       string
 	CreationTime    IrisTime
-	Results         IrisResultTable
-	Prefixes        IrisResultTable
-	Links           IrisResultTable
-	Probes          IrisResultTable
+	Results         IrisTable
+	Prefixes        IrisTable
+	Links           IrisTable
+	Probes          IrisTable
 }
 
 // uuidToTablePart replaces "-" with "_" in a UUID for use in table names.
@@ -202,8 +202,8 @@ func tableName(kind IrisTableKind, measurementUUID, agentUUID string) string {
 
 // NewIrisTableGroup constructs an IrisTableGroup for a given measurement and agent.
 func NewIrisTableGroup(measurementUUID, agentUUID string, creationTime IrisTime) IrisTableGroup {
-	makeTable := func(kind IrisTableKind) IrisResultTable {
-		return IrisResultTable{
+	makeTable := func(kind IrisTableKind) IrisTable {
+		return IrisTable{
 			Kind:            kind,
 			TableName:       tableName(kind, measurementUUID, agentUUID),
 			MeasurementUUID: measurementUUID,

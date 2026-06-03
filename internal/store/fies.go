@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	defaultChunkSize     = 1_000_000
-	defaultRTTResolution = 0.1
-	zeroCursor           = "::"
+	DefaultFIEChunkSize      = 1_000_000
+	DefaultIrisRTTResolution = 0.1
+	zeroCursor               = "::"
 )
 
 //go:embed sql/fies_create.sql
@@ -39,12 +39,10 @@ type FiesConfig struct {
 func DefaultFiesConfig(sourceTable string) FiesConfig {
 	return FiesConfig{
 		SourceTable:   sourceTable,
-		ChunkSize:     defaultChunkSize,
-		RTTResolution: defaultRTTResolution,
+		ChunkSize:     DefaultFIEChunkSize,
+		RTTResolution: DefaultIrisRTTResolution,
 	}
 }
-
-// ── Template data ─────────────────────────────────────────────────────────────
 
 type fiesTemplateData struct {
 	Database      string
@@ -54,8 +52,6 @@ type fiesTemplateData struct {
 	ChunkSize     int
 	Cursor        string
 }
-
-// ── Public API ────────────────────────────────────────────────────────────────
 
 // CreateFiesTable creates the fies table if it does not exist.
 func (s *Store) CreateFiesTable(ctx context.Context, dest DatabaseTable) error {
