@@ -12,19 +12,20 @@ import (
 )
 
 const (
-	defaultEndpoint = "https://api.iris.dioptra.io"
-	pageLimit       = 200
+	DefaultEndpoint = "https://api.iris.dioptra.io"
+
+	pageLimit = 200
 )
 
 type Config struct {
 	Username string
 	Password string
-	Endpoint string // defaults to https://api.iris.dioptra.io
+	Endpoint string // defaults to DefaultEndpoint
 }
 
 func (c *Config) endpoint() string {
 	if c.Endpoint == "" {
-		return defaultEndpoint
+		return DefaultEndpoint
 	}
 	return strings.TrimRight(c.Endpoint, "/")
 }

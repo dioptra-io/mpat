@@ -14,7 +14,7 @@ func main() {
 		SilenceUsage: true,
 	}
 
-	// rootCmd.AddCommand(fetchCmd())
+	rootCmd.AddCommand(fetchCmd())
 	rootCmd.AddCommand(computeCmd())
 
 	if err := rootCmd.Execute(); err != nil {
