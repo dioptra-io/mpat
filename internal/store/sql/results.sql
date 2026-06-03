@@ -70,9 +70,9 @@ CREATE TABLE IF NOT EXISTS {{.Database}}.{{.Table}}
 )
 ENGINE = MergeTree
 ORDER BY (
-    probe_protocol,
-    probe_src_addr,
     probe_dst_prefix,
+    probe_src_addr,
+    probe_protocol,
     probe_dst_addr,
     probe_src_port,
     probe_dst_port,
