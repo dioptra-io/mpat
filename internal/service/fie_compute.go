@@ -21,10 +21,10 @@ const (
 	zeroCursor = "::"
 )
 
-//go:embed templates/fie_insert.tmpl
+//go:embed templates/fie_results_insert.tmpl
 var fieInsertTemplate string
 
-//go:embed templates/fie_cursor.tmpl
+//go:embed templates/fie_results_cursor.tmpl
 var fieCursorTemplate string
 
 type fieTemplateData struct {

@@ -23,7 +23,7 @@ func main() {
 	svc := service.NewFIEComputeService(s, service.FIEComputeConfig{
 		ChunkSize:         1_000_000,
 		RTTResolution:     0.1,
-		PreparationPolicy: store.PreparationPolicyAppend,
+		PreparationPolicy: store.PreparationPolicyFail,
 	})
 
 	source := store.DatabaseTable{
