@@ -15,6 +15,7 @@ func main() {
 	}
 
 	rootCmd.AddCommand(fetchCmd())
+	rootCmd.AddCommand(computeCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
