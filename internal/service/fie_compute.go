@@ -22,10 +22,23 @@ const (
 )
 
 //go:embed templates/fie_results_insert.tmpl
-var fieInsertTemplate string
+var fieInsertResultsTemplate string
 
 //go:embed templates/fie_results_cursor.tmpl
-var fieCursorTemplate string
+var fieCursorResultsTemplate string
+
+//go:embed templates/fie_resultslite_insert.tmpl
+var fieInsertResultsLiteTemplate string
+
+//go:embed templates/fie_resultslite_cursor.tmpl
+var fieCursorResultsLiteTemplate string
+
+type sourceSchema int
+
+const (
+	sourceSchemaResults sourceSchema = iota
+	sourceSchemaResultsLite
+)
 
 type fieTemplateData struct {
 	SourceDatabase string
@@ -68,7 +81,7 @@ func NewFIEComputeService(s *store.Store, config FIEComputeConfig) *FIEComputeSe
 
 // Compute computes FIEs from source into dest.
 func (f *FIEComputeService) Compute(ctx context.Context, source, dest store.DatabaseTable) error {
-	// Step 1: Validate source schema.
+	// Step 1: Validate source schema and detect type.
 	sourceSchema, err := f.store.TableSchema(ctx, source)
 	if err != nil {
 		return fmt.Errorf("fie: failed to get source schema: %w", err)
@@ -76,16 +89,16 @@ func (f *FIEComputeService) Compute(ctx context.Context, source, dest store.Data
 	if sourceSchema == nil {
 		return fmt.Errorf("fie: source table %s.%s does not exist", source.Database, source.Table)
 	}
-	ok, err := schema.AreEquivalent(schema.ResultsSchema{}, sourceSchema, false)
-	if err != nil {
-		return fmt.Errorf("fie: failed to validate source schema: %w", err)
-	}
-	if !ok {
-		missing, err := schema.MissingColumns(schema.ResultsSchema{}, sourceSchema)
-		if err != nil {
-			return fmt.Errorf("fie: failed to get missing columns: %w", err)
-		}
-		return fmt.Errorf("fie: source table %s.%s is missing required columns: %v", source.Database, source.Table, missing)
+
+	var detectedSchema schema.Schema
+	switch {
+	case func() bool { ok, _ := schema.AreEquivalent(schema.ResultsSchema{}, sourceSchema, false); return ok }():
+		detectedSchema = schema.ResultsSchema{}
+	case func() bool { ok, _ := schema.AreEquivalent(schema.ResultsLiteSchema{}, sourceSchema, false); return ok }():
+		detectedSchema = schema.ResultsLiteSchema{}
+	default:
+		missing, _ := schema.MissingColumns(schema.ResultsLiteSchema{}, sourceSchema)
+		return fmt.Errorf("fie: source table %s.%s does not match any supported schema, missing columns: %v", source.Database, source.Table, missing)
 	}
 
 	// Step 2: Prepare destination table.
@@ -93,7 +106,7 @@ func (f *FIEComputeService) Compute(ctx context.Context, source, dest store.Data
 		return fmt.Errorf("fie: failed to prepare destination table: %w", err)
 	}
 
-	// Step 3: Run the keyset-paginated INSERT loop.
+	// Step 3: Run the keyset-paginated INSERT loop. NEEDS UPDATE
 	cursor := zeroCursor
 	chunk := 0
 	totalRows := uint64(0)
@@ -103,7 +116,7 @@ func (f *FIEComputeService) Compute(ctx context.Context, source, dest store.Data
 		chunkStart := time.Now()
 
 		// Get the last prefix of this chunk for the next cursor.
-		lastPrefix, err := f.fiesLastPrefix(ctx, source, cursor)
+		lastPrefix, err := f.fiesLastPrefix(ctx, source, cursor, detectedSchema)
 		if err != nil {
 			return fmt.Errorf("fie: failed to get last prefix for cursor %s: %w", cursor, err)
 		}
@@ -118,7 +131,7 @@ func (f *FIEComputeService) Compute(ctx context.Context, source, dest store.Data
 		}
 
 		// Insert the chunk.
-		if err := f.insertChunk(ctx, source, dest, cursor); err != nil {
+		if err := f.insertChunk(ctx, source, dest, cursor, detectedSchema); err != nil {
 			return fmt.Errorf("fie: failed to insert chunk %d (cursor=%s): %w", chunk, cursor, err)
 		}
 
@@ -142,8 +155,18 @@ func (f *FIEComputeService) Compute(ctx context.Context, source, dest store.Data
 	return nil
 }
 
-func (f *FIEComputeService) fiesLastPrefix(ctx context.Context, source store.DatabaseTable, cursor string) (string, error) {
-	query, err := renderTemplate("fie_cursor", fieCursorTemplate, fieTemplateData{
+func (f *FIEComputeService) fiesLastPrefix(ctx context.Context, source store.DatabaseTable, cursor string, s schema.Schema) (string, error) {
+	var tmpl string
+	switch s.(type) {
+	case schema.ResultsSchema:
+		tmpl = fieCursorResultsTemplate
+	case schema.ResultsLiteSchema:
+		tmpl = fieCursorResultsLiteTemplate
+	default:
+		return "", fmt.Errorf("fie: unsupported source schema %s", s.SchemaName())
+	}
+
+	query, err := renderTemplate("fie_cursor", tmpl, fieTemplateData{
 		SourceDatabase: source.Database,
 		SourceTable:    source.Table,
 		ChunkSize:      f.config.ChunkSize,
@@ -163,8 +186,18 @@ func (f *FIEComputeService) fiesLastPrefix(ctx context.Context, source store.Dat
 	return lastPrefix, nil
 }
 
-func (f *FIEComputeService) insertChunk(ctx context.Context, source, dest store.DatabaseTable, cursor string) error {
-	query, err := renderTemplate("fie_insert", fieInsertTemplate, fieTemplateData{
+func (f *FIEComputeService) insertChunk(ctx context.Context, source, dest store.DatabaseTable, cursor string, s schema.Schema) error {
+	var tmpl string
+	switch s.(type) {
+	case schema.ResultsSchema:
+		tmpl = fieInsertResultsTemplate
+	case schema.ResultsLiteSchema:
+		tmpl = fieInsertResultsLiteTemplate
+	default:
+		return fmt.Errorf("fie: unsupported source schema %s", s.SchemaName())
+	}
+
+	query, err := renderTemplate("fie_insert", tmpl, fieTemplateData{
 		SourceDatabase: source.Database,
 		SourceTable:    source.Table,
 		DestDatabase:   dest.Database,

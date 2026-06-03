@@ -1,0 +1,10 @@
+SELECT max(probe_dst_prefix)
+FROM (
+    SELECT DISTINCT probe_dst_prefix
+    FROM {{.SourceDatabase}}.{{.SourceTable}}
+    WHERE probe_protocol IN (1, 17, 58)
+      AND probe_dst_prefix > toIPv6('{{.Cursor}}')
+    ORDER BY probe_dst_prefix
+    LIMIT {{.ChunkSize}}
+)
+HAVING count() > 0
