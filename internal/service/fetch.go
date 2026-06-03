@@ -106,6 +106,24 @@ func (f *FetchService) Fetch(ctx context.Context, sourceNames []string, dest sto
 		return fmt.Errorf("fetch: failed to prepare destination table: %w", err)
 	}
 
+	// Check if the existing table's schema is equivalent to the target schema.
+	existingSchema, err := f.store.TableSchema(ctx, dest)
+	if err != nil {
+		return fmt.Errorf("fetch: failed to get existing table schema: %w", err)
+	}
+	if existingSchema != nil {
+		ok, err := schema.AreEquivalent(targetSchema, existingSchema, false)
+		if err != nil {
+			return fmt.Errorf("fetch: failed to compare schemas: %w", err)
+		}
+		if !ok {
+			missing, _ := schema.MissingColumns(targetSchema, existingSchema)
+			extra, _ := schema.MissingColumns(existingSchema, targetSchema)
+			return fmt.Errorf("fetch: destination table %s.%s schema does not match %s, missing columns: %v, extra columns: %v",
+				dest.Database, dest.Table, targetSchema.SchemaName(), missing, extra)
+		}
+	}
+
 	// Step 3: Fetch and write chunks.
 	var ewmaRate float64
 	globalChunk := int64(0)
