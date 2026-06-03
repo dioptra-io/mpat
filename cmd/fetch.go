@@ -99,7 +99,7 @@ func runFetchIrisResults(ctx context.Context, destTable, database, policy, table
 	if err != nil {
 		return fmt.Errorf("failed to create iris client: %w", err)
 	}
-	defer irisClient.Logout()
+	defer func() { _ = irisClient.Logout() }()
 
 	config, err := store.ConfigFromDSN(mustEnv("MPAT_CLICKHOUSE"))
 	if err != nil {
