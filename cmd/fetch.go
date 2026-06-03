@@ -38,7 +38,7 @@ func fetchCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runIrisResults(
 				args[0],
-				store.WritePolicy(policy),
+				store.PreparationPolicy(policy),
 				tableFlag,
 				measurement,
 				from,
@@ -66,7 +66,7 @@ func fetchCmd() *cobra.Command {
 	return fetchCmd
 }
 
-func runIrisResults(destTable string, policy store.WritePolicy, tableFlag, measurement, fromStr, toStr, stateStr, tagPattern string, chunkSize int64, ewmaAlpha float64) error {
+func runIrisResults(destTable string, policy store.PreparationPolicy, tableFlag, measurement, fromStr, toStr, stateStr, tagPattern string, chunkSize int64, ewmaAlpha float64) error {
 	modes := 0
 	if tableFlag != "" {
 		modes++
@@ -195,7 +195,7 @@ func runIrisResults(destTable string, policy store.WritePolicy, tableFlag, measu
 	for i, t := range tables {
 		tablePolicy := policy
 		if i > 0 {
-			tablePolicy = store.StorePolicyAppend
+			tablePolicy = store.PreparationPolicyAppend
 		}
 
 		fmt.Printf("[%d/%d] %s   %s rows   %d chunks\n",
@@ -203,7 +203,7 @@ func runIrisResults(destTable string, policy store.WritePolicy, tableFlag, measu
 
 		for c := int64(0); c < t.chunks; c++ {
 			offset := c * chunkSize
-			chunkPolicy := store.StorePolicyAppend
+			chunkPolicy := store.PreparationPolicyAppend
 			if c == 0 {
 				chunkPolicy = tablePolicy
 			}

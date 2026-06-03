@@ -71,14 +71,7 @@ func AreEquivalent(a, b Schema, includeMaterialized bool) (bool, error) {
 	return aSubsetB && bSubsetA, nil
 }
 
-// columnsFromDDL renders the DDL template with dummy values and parses
-// the resulting CREATE TABLE statement to extract column definitions.
-func parseColumns(ddlTemplate string) ([]Column, error) {
-	ddl, err := renderDDLTemplate(ddlTemplate, "database", "table") // placeholder values
-	if err != nil {
-		return nil, fmt.Errorf("schema: failed to render DDL template: %w", err)
-	}
-
+func ParseColumnsFromDDL(ddl string) ([]Column, error) {
 	p := clickhouse.NewParser(ddl)
 	stmts, err := p.ParseStmts()
 	if err != nil {
@@ -107,6 +100,17 @@ func parseColumns(ddlTemplate string) ([]Column, error) {
 		})
 	}
 	return columns, nil
+}
+
+// parseColumnsFromDDLTemplate renders the DDL template with dummy values and parses
+// the resulting CREATE TABLE statement to extract column definitions.
+func parseColumnsFromDDLTemplate(ddlTemplate string) ([]Column, error) {
+	ddl, err := renderDDLTemplate(ddlTemplate, "database", "table") // placeholder values
+	if err != nil {
+		return nil, fmt.Errorf("schema: failed to render DDL template: %w", err)
+	}
+
+	return ParseColumnsFromDDL(ddl)
 }
 
 func renderDDLTemplate(templateString, database, table string) (string, error) {

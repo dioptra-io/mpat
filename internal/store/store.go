@@ -9,30 +9,30 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"text/template"
 	"time"
 
 	_ "embed"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/dioptra-io/ufuk-research/internal/schemas"
 )
 
 const (
 	DefaultDatabase = "mpat"
 )
 
-// WritePolicy controls how the store behaves when inserting into a table that already contains data.
-type WritePolicy string
+// PreparationPolicy controls how the store behaves when inserting into a table that already contains data.
+type PreparationPolicy string
 
 const (
-	// StorePolicyReplace drops the table and recreates it before inserting.
-	StorePolicyReplace WritePolicy = "replace"
-	// StorePolicyTruncate truncates the table before inserting.
-	StorePolicyTruncate WritePolicy = "truncate"
-	// StorePolicyFail returns an error if the table contains any rows before inserting.
-	StorePolicyFail WritePolicy = "fail"
-	// StorePolicyAppend inserts without any prior checks or modifications.
-	StorePolicyAppend WritePolicy = "append"
+	// PreparationPolicyReplace drops the table and recreates it before inserting.
+	PreparationPolicyReplace PreparationPolicy = "replace"
+	// PreparationPolicyTruncate truncates the table before inserting.
+	PreparationPolicyTruncate PreparationPolicy = "truncate"
+	// PreparationPolicyFail returns an error if the table contains any rows before inserting.
+	PreparationPolicyFail PreparationPolicy = "fail"
+	// PreparationPolicyAppend inserts without any prior checks or modifications.
+	PreparationPolicyAppend PreparationPolicy = "append"
 )
 
 // DatabaseTable identifies a table within a specific database.
@@ -131,26 +131,29 @@ func NewStore(config *StoreConfig) (*Store, error) {
 
 // PrepareTable prepares the destination table according to the given write policy
 // before any data is inserted. It must be called before writing rows to dest.
+// The schema DDL is rendered from the provided Schema using the destination
+// database and table name.
 //
 // The following policies are supported:
 //
 //   - StorePolicyReplace:  Drops the destination table if it exists, then recreates it
-//     using the provided schema DDL. All existing data is lost.
+//     using the rendered schema DDL. All existing data is lost.
 //
 //   - StorePolicyTruncate: Creates the destination table if it does not exist, then
 //     truncates it if it contains any rows. The table structure is preserved.
 //
 //   - StorePolicyFail:     Fails with an error if the destination table already contains
-//     rows. If the table is empty or does not exist, it is created using the schema DDL.
+//     rows. If the table is empty or does not exist, it is created using the rendered
+//     schema DDL.
 //
 //   - StorePolicyAppend:   Creates the destination table if it does not exist, then
 //     leaves any existing rows intact. New rows will be appended on insert.
-func (s *Store) PrepareTable(writePolicy WritePolicy, dest DatabaseTable, schema string) error {
-	ctx := context.Background()
+func (s *Store) PrepareTable(ctx context.Context, writePolicy PreparationPolicy, dest DatabaseTable, schemaInterface schemas.Schema) error {
+	schema := schemaInterface.DDL(dest.Database, dest.Table)
 	qualified := fmt.Sprintf("%s.%s", dest.Database, dest.Table)
 
 	switch writePolicy {
-	case StorePolicyReplace:
+	case PreparationPolicyReplace:
 		if err := s.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", qualified)); err != nil {
 			return fmt.Errorf("store: replace: failed to drop table: %w", err)
 		}
@@ -158,7 +161,7 @@ func (s *Store) PrepareTable(writePolicy WritePolicy, dest DatabaseTable, schema
 			return fmt.Errorf("store: replace: failed to create table: %w", err)
 		}
 
-	case StorePolicyTruncate:
+	case PreparationPolicyTruncate:
 		if err := s.Exec(ctx, schema); err != nil {
 			return fmt.Errorf("store: truncate: failed to create table if not exists: %w", err)
 		}
@@ -172,7 +175,7 @@ func (s *Store) PrepareTable(writePolicy WritePolicy, dest DatabaseTable, schema
 			}
 		}
 
-	case StorePolicyFail:
+	case PreparationPolicyFail:
 		count, err := s.RowCount(ctx, dest)
 		if err != nil {
 			return fmt.Errorf("store: fail: failed to count rows: %w", err)
@@ -184,7 +187,7 @@ func (s *Store) PrepareTable(writePolicy WritePolicy, dest DatabaseTable, schema
 			return fmt.Errorf("store: fail: failed to create table if not exists: %w", err)
 		}
 
-	case StorePolicyAppend:
+	case PreparationPolicyAppend:
 		if err := s.Exec(ctx, schema); err != nil {
 			return fmt.Errorf("store: append: failed to create table if not exists: %w", err)
 		}
@@ -193,6 +196,37 @@ func (s *Store) PrepareTable(writePolicy WritePolicy, dest DatabaseTable, schema
 		return fmt.Errorf("store: unknown policy %q", writePolicy)
 	}
 	return nil
+}
+
+// TableSchema returns the schema of the given table as a DynamicSchema,
+// or nil if the table does not exist.
+func (s *Store) TableSchema(ctx context.Context, dest DatabaseTable) (*schemas.DynamicSchema, error) {
+	var exists uint64
+	err := s.conn.QueryRow(ctx,
+		"SELECT count() FROM system.tables WHERE database = ? AND name = ?",
+		dest.Database, dest.Table,
+	).Scan(&exists)
+	if err != nil {
+		return nil, fmt.Errorf("store: failed to check table existence: %w", err)
+	}
+	if exists == 0 {
+		return nil, nil
+	}
+
+	var ddl string
+	err = s.conn.QueryRow(ctx,
+		"SELECT create_table_query FROM system.tables WHERE database = ? AND name = ?",
+		dest.Database, dest.Table,
+	).Scan(&ddl)
+	if err != nil {
+		return nil, fmt.Errorf("store: failed to get table DDL: %w", err)
+	}
+
+	schema, err := schemas.NewDynamicSchema(ddl)
+	if err != nil {
+		return nil, fmt.Errorf("store: failed to parse table schema: %w", err)
+	}
+	return schema, nil
 }
 
 // RowCount returns the number of rows in dest, or 0 if the table does not exist.
@@ -226,14 +260,14 @@ func (s *Store) Exec(ctx context.Context, query string, args ...any) error {
 
 // InsertJSONL streams rows directly into ClickHouse via HTTP POST.
 // If the stream is gzip-compressed, it is decompressed transparently before sending.
-// The format is required to be JSONEachRow
+// The input format is required to be JSONEachRow.
 func (s *Store) InsertJSONL(dest DatabaseTable, rows io.Reader) error {
 	query := fmt.Sprintf("INSERT INTO %s.%s FORMAT JSONEachRow", dest.Database, dest.Table)
 
 	params := url.Values{}
 	params.Set("query", query)
 	params.Set("database", dest.Database)
-	params.Set("max_execution_time", "3600")
+	params.Set("max_execution_time", "3600") // hardcoded for now
 	params.Set("receive_timeout", "3600")
 	params.Set("send_timeout", "3600")
 
@@ -278,14 +312,14 @@ func (s *Store) InsertJSONL(dest DatabaseTable, rows io.Reader) error {
 	return nil
 }
 
-func renderTemplate(name, tmpl string, data any) (string, error) {
-	t, err := template.New(name).Parse(tmpl)
-	if err != nil {
-		return "", err
-	}
-	var buf bytes.Buffer
-	if err := t.Execute(&buf, data); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
-}
+// func renderTemplate(name, tmpl string, data any) (string, error) {
+// 	t, err := template.New(name).Parse(tmpl)
+// 	if err != nil {
+// 		return "", err
+// 	}
+// 	var buf bytes.Buffer
+// 	if err := t.Execute(&buf, data); err != nil {
+// 		return "", err
+// 	}
+// 	return buf.String(), nil
+// }

@@ -5,7 +5,7 @@ import (
 )
 
 //go:embed templates/resultslite.sql
-var resultsliteDDL string
+var resultsliteDDLTemplate string
 
 type ResultsliteSchema struct{}
 
@@ -14,7 +14,7 @@ func (s ResultsliteSchema) SchemaName() string {
 }
 
 func (s ResultsliteSchema) DDL(database, table string) string {
-	str, err := renderDDLTemplate(resultsliteDDL, database, table)
+	str, err := renderDDLTemplate(resultsliteDDLTemplate, database, table)
 	if err != nil {
 		panic(err)
 	}
@@ -22,5 +22,5 @@ func (s ResultsliteSchema) DDL(database, table string) string {
 }
 
 func (s ResultsliteSchema) Columns() ([]Column, error) {
-	return parseColumns(resultsliteDDL)
+	return parseColumnsFromDDLTemplate(resultsliteDDLTemplate)
 }

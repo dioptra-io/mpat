@@ -5,7 +5,7 @@ import (
 )
 
 //go:embed templates/fies.sql
-var resultsDDL string
+var resultsDDLTemplate string
 
 type ResultsSchema struct{}
 
@@ -14,7 +14,7 @@ func (s ResultsSchema) SchemaName() string {
 }
 
 func (s ResultsSchema) DDL(database, table string) string {
-	str, err := renderDDLTemplate(resultsDDL, database, table)
+	str, err := renderDDLTemplate(resultsDDLTemplate, database, table)
 	if err != nil {
 		panic(err)
 	}
@@ -22,5 +22,5 @@ func (s ResultsSchema) DDL(database, table string) string {
 }
 
 func (s ResultsSchema) Columns() ([]Column, error) {
-	return parseColumns(resultsDDL)
+	return parseColumnsFromDDLTemplate(resultsDDLTemplate)
 }

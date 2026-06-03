@@ -5,7 +5,7 @@ import (
 )
 
 //go:embed templates/fies.sql
-var fiesDDL string
+var fiesDDLTemplate string
 
 type FiesSchema struct{}
 
@@ -14,7 +14,7 @@ func (s FiesSchema) SchemaName() string {
 }
 
 func (s FiesSchema) DDL(database, table string) string {
-	str, err := renderDDLTemplate(fiesDDL, database, table)
+	str, err := renderDDLTemplate(fiesDDLTemplate, database, table)
 	if err != nil {
 		panic(err)
 	}
@@ -22,5 +22,5 @@ func (s FiesSchema) DDL(database, table string) string {
 }
 
 func (s FiesSchema) Columns() ([]Column, error) {
-	return parseColumns(fiesDDL)
+	return parseColumnsFromDDLTemplate(fiesDDLTemplate)
 }

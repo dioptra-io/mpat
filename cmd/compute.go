@@ -79,7 +79,7 @@ func runResultsFies(ctx context.Context, inputTable, outputTable, database strin
 	if err != nil {
 		return fmt.Errorf("failed to create fies schema: %w", err)
 	}
-	if err := s.PrepareTable(store.WritePolicy(policy), dest, fiesSchema); err != nil {
+	if err := s.PrepareTable(store.PreparationPolicy(policy), dest, fiesSchema); err != nil {
 		return fmt.Errorf("failed to create fies table: %w", err)
 	}
 
