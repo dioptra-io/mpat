@@ -18,6 +18,7 @@ Internet Measurement Platforms (IMPs) such as [Iris](https://iris.dioptra.io) co
 
 - A client for the Iris measurement platform API.
 - A high-throughput pipeline for fetching probe results into a local ClickHouse instance.
+- A computation pipeline for deriving higher-level structures such as Forwarding Info Elements (FIEs) from raw probe results.
 - A flexible query interface for filtering measurements by state, date range, and tag.
 
 ---
@@ -27,15 +28,19 @@ Internet Measurement Platforms (IMPs) such as [Iris](https://iris.dioptra.io) co
 MPAT is structured around two internal packages:
 
 - **`internal/iris`** — Client for the Iris API. Handles JWT authentication, measurement queries, and ClickHouse result retrieval via HTTP streaming.
-- **`internal/store`** — Client for the local ClickHouse instance. Handles table creation, write policies, and bulk insertion.
+- **`internal/store`** — Client for the local ClickHouse instance. Handles table creation, write policies, bulk insertion, and derived table computation.
 
 Data flows as follows:
 
 ```
-Iris ClickHouse  →  mp (HTTP stream)  →  Local ClickHouse
+Iris ClickHouse  →  mp fetch (HTTP stream)  →  Local ClickHouse
+                                                      ↓
+                                               mp compute
+                                                      ↓
+                                            Derived ClickHouse tables (e.g. FIEs)
 ```
 
-No intermediate deserialization occurs — the JSON stream from Iris is piped directly into the local ClickHouse instance.
+No intermediate deserialization occurs during fetch — the JSON stream from Iris is piped directly into the local ClickHouse instance. Compute operations run entirely server-side within ClickHouse.
 
 ---
 
@@ -145,6 +150,61 @@ total: 147 chunks across 2 table(s)
 [2/2] results__c4a1_...   44,619,062 rows   30 chunks
       chunk 1/118/147   |   4s   |   121,951 rows/s   |   Jun 2, 8:10pm (in ~2m1s)
 ```
+
+---
+
+### `mp compute results-fies <input-table> <output-table>`
+
+Computes Forwarding Info Elements (FIEs) from a raw Iris results table and writes them into a destination ClickHouse table. The computation runs entirely server-side within ClickHouse using keyset-paginated chunks, with no data movement through the client.
+
+A FIE represents a observed forwarding step between two consecutive TTL hops within the same flow. Given a flow with probe TTL values `h` and `h+1`, a FIE captures the near router (at TTL `h`) and the far router (at TTL `h+1`) along with their associated timestamps and reply addresses. Only flows where each TTL hop has exactly one distinct reply address are included (skip policy).
+
+#### Flags
+
+| Flag               | Default   | Description                                          |
+| ------------------ | --------- | ---------------------------------------------------- |
+| `--database`       | `mpat`    | Destination ClickHouse database                      |
+| `--chunk-size`     | `1000000` | Number of destination prefixes per chunk             |
+| `--rtt-resolution` | `0.1`     | RTT resolution in milliseconds (Iris default: `0.1`) |
+
+#### Example
+
+```bash
+mp compute results-fies iris_results__20260601 iris_fies__20260601
+```
+
+#### Example output
+
+```
+computing fies: iris_results__20260601 -> mpat.iris_fies__20260601
+[chunk 1] cursor=::                       last=::ffff:1.199.230.219   rows=3384343  elapsed=3.5s   total=3384343
+[chunk 2] cursor=::ffff:1.199.230.219     last=::ffff:2.x.x.x        rows=3291872  elapsed=3.2s   total=6676215
+...
+done: 156 chunks, 696001505 rows, elapsed=16m38s
+```
+
+#### Output table schema
+
+| Column                    | Type       | Description                                |
+| ------------------------- | ---------- | ------------------------------------------ |
+| `sequence_number`         | `UInt64`   | Globally unique monotonic FIE identifier   |
+| `agent_id`                | `IPv6`     | Probing agent (source address)             |
+| `probing_directive_id`    | `UInt32`   | Always `0` for this computation            |
+| `ip_version`              | `UInt8`    | IP version: `4` or `6`                     |
+| `protocol`                | `UInt8`    | Probe protocol (ICMP=1, UDP=17, ICMPv6=58) |
+| `source_address`          | `IPv6`     | Probe source address                       |
+| `destination_address`     | `IPv6`     | Probe destination address                  |
+| `near_probe_ttl`          | `UInt8`    | TTL of the near hop `h`                    |
+| `near_reply_address`      | `IPv6`     | Reply address at TTL `h`                   |
+| `near_sent_timestamp`     | `DateTime` | Probe send time at TTL `h`                 |
+| `near_received_timestamp` | `DateTime` | Estimated reply receive time at TTL `h`    |
+| `far_probe_ttl`           | `UInt8`    | TTL of the far hop `h+1`                   |
+| `far_reply_address`       | `IPv6`     | Reply address at TTL `h+1`                 |
+| `far_sent_timestamp`      | `DateTime` | Probe send time at TTL `h+1`               |
+| `far_received_timestamp`  | `DateTime` | Estimated reply receive time at TTL `h+1`  |
+| `production_timestamp`    | `DateTime` | Time at which this FIE was computed        |
+
+The table is ordered by `(near_reply_address, destination_address, agent_id, production_timestamp)` for efficient queries grouping by forwarding hop and destination.
 
 ---
 

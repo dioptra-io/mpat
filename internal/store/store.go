@@ -21,18 +21,18 @@ const (
 	DefaultDatabase = "mpat"
 )
 
-// StorePolicy controls how the store behaves when inserting into a table that already contains data.
-type StorePolicy string
+// WritePolicy controls how the store behaves when inserting into a table that already contains data.
+type WritePolicy string
 
 const (
 	// StorePolicyReplace drops the table and recreates it before inserting.
-	StorePolicyReplace StorePolicy = "replace"
+	StorePolicyReplace WritePolicy = "replace"
 	// StorePolicyTruncate truncates the table before inserting.
-	StorePolicyTruncate StorePolicy = "truncate"
+	StorePolicyTruncate WritePolicy = "truncate"
 	// StorePolicyFail returns an error if the table contains any rows before inserting.
-	StorePolicyFail StorePolicy = "fail"
+	StorePolicyFail WritePolicy = "fail"
 	// StorePolicyAppend inserts without any prior checks or modifications.
-	StorePolicyAppend StorePolicy = "append"
+	StorePolicyAppend WritePolicy = "append"
 )
 
 // DatabaseTable identifies a table within a specific database.
@@ -52,7 +52,7 @@ type StoreConfig struct {
 	Host     string
 	Username string
 	Password string
-	Database string // defaults to "mpat"
+	Database string // defaults to DefaultDatabase
 }
 
 func (c *StoreConfig) Validate() error {
@@ -129,11 +129,27 @@ func NewStore(config *StoreConfig) (*Store, error) {
 	}, nil
 }
 
-func (s *Store) HandlePolicy(policy StorePolicy, dest DatabaseTable, schema string) error {
+// PrepareTable prepares the destination table according to the given write policy
+// before any data is inserted. It must be called before writing rows to dest.
+//
+// The following policies are supported:
+//
+//   - StorePolicyReplace:  Drops the destination table if it exists, then recreates it
+//     using the provided schema DDL. All existing data is lost.
+//
+//   - StorePolicyTruncate: Creates the destination table if it does not exist, then
+//     truncates it if it contains any rows. The table structure is preserved.
+//
+//   - StorePolicyFail:     Fails with an error if the destination table already contains
+//     rows. If the table is empty or does not exist, it is created using the schema DDL.
+//
+//   - StorePolicyAppend:   Creates the destination table if it does not exist, then
+//     leaves any existing rows intact. New rows will be appended on insert.
+func (s *Store) PrepareTable(writePolicy WritePolicy, dest DatabaseTable, schema string) error {
 	ctx := context.Background()
 	qualified := fmt.Sprintf("%s.%s", dest.Database, dest.Table)
 
-	switch policy {
+	switch writePolicy {
 	case StorePolicyReplace:
 		if err := s.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", qualified)); err != nil {
 			return fmt.Errorf("store: replace: failed to drop table: %w", err)
@@ -174,7 +190,7 @@ func (s *Store) HandlePolicy(policy StorePolicy, dest DatabaseTable, schema stri
 		}
 
 	default:
-		return fmt.Errorf("store: unknown policy %q", policy)
+		return fmt.Errorf("store: unknown policy %q", writePolicy)
 	}
 	return nil
 }

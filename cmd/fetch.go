@@ -38,7 +38,7 @@ func fetchCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runIrisResults(
 				args[0],
-				store.StorePolicy(policy),
+				store.WritePolicy(policy),
 				tableFlag,
 				measurement,
 				from,
@@ -66,7 +66,7 @@ func fetchCmd() *cobra.Command {
 	return fetchCmd
 }
 
-func runIrisResults(destTable string, policy store.StorePolicy, tableFlag, measurement, fromStr, toStr, stateStr, tagPattern string, chunkSize int64, ewmaAlpha float64) error {
+func runIrisResults(destTable string, policy store.WritePolicy, tableFlag, measurement, fromStr, toStr, stateStr, tagPattern string, chunkSize int64, ewmaAlpha float64) error {
 	modes := 0
 	if tableFlag != "" {
 		modes++
@@ -221,7 +221,7 @@ func runIrisResults(destTable string, policy store.StorePolicy, tableFlag, measu
 			}
 
 			start := time.Now()
-			if err := s.HandlePolicy(chunkPolicy, dbt, schema); err != nil {
+			if err := s.PrepareTable(chunkPolicy, dbt, schema); err != nil {
 				return fmt.Errorf("[%d/%d] chunk %d: failed to handle policy: %w", i+1, len(tables), c+1, err)
 			}
 			if err := s.InsertJSONL(dbt, rows); err != nil {
