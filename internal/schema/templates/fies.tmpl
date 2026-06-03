@@ -1,5 +1,4 @@
-CREATE TABLE IF NOT EXISTS {{.Database}}.{{.Table}}
-(
+CREATE TABLE IF NOT EXISTS {{.Database}}.{{.Table}} (
     `sequence_number`         UInt64,
     `agent_id`                IPv6,
     `probing_directive_id`    UInt32,
@@ -18,5 +17,11 @@ CREATE TABLE IF NOT EXISTS {{.Database}}.{{.Table}}
     `production_timestamp`    DateTime
 )
 ENGINE = MergeTree
-ORDER BY (near_reply_address, destination_address, agent_id, production_timestamp)
-SETTINGS index_granularity = 8192;
+ORDER BY (
+	near_reply_address, 
+	destination_address, 
+	agent_id, 
+	production_timestamp
+)
+SETTINGS 
+	index_granularity = 8192;

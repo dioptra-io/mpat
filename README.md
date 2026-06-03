@@ -25,17 +25,19 @@ Internet Measurement Platforms (IMPs) such as [Iris](https://iris.dioptra.io) co
 
 ## Architecture
 
-MPAT is structured around two internal packages:
+MPAT is structured around the following internal packages:
 
 - **`internal/iris`** — Client for the Iris API. Handles JWT authentication, measurement queries, and ClickHouse result retrieval via HTTP streaming.
-- **`internal/store`** — Client for the local ClickHouse instance. Handles table creation, write policies, bulk insertion, and derived table computation.
+- **`internal/store`** — Low-level client for the local ClickHouse instance. Handles table creation, write policies, and bulk insertion.
+- **`internal/schema`** — Schema definitions for all supported table types (`results`, `resultslite`, `fies`). Provides schema introspection, compatibility checking, DDL rendering, and DDL parsing via the AfterShip ClickHouse SQL parser.
+- **`internal/service`** — Business logic for fetch and compute operations. Each service owns its SQL templates and orchestrates store and iris client interactions.
 
 Data flows as follows:
 
 ```
 Iris ClickHouse  →  mp fetch (HTTP stream)  →  Local ClickHouse
                                                       ↓
-                                               mp compute
+                                               mp compute fies
                                                       ↓
                                             Derived ClickHouse tables (e.g. FIEs)
 ```
@@ -46,7 +48,7 @@ No intermediate deserialization occurs during fetch — the JSON stream from Iri
 
 ## Prerequisites
 
-- Go 1.21+
+- Go 1.23.4+
 - A running ClickHouse instance
 - Access to the Iris measurement platform
 
@@ -82,11 +84,17 @@ This builds the `mp` binary and installs it to `$GOPATH/bin`.
 
 Fetches Iris probe results into a local ClickHouse table. Supports three source selection modes — exactly one must be specified.
 
+By default, only the columns required for downstream computation are fetched (`--lite`). Use `--lite=false` to fetch the full results schema.
+
 #### Flags
 
 | Flag            | Default    | Description                                            |
 | --------------- | ---------- | ------------------------------------------------------ |
 | `--policy`      | `fail`     | Write policy: `replace`, `truncate`, `fail`, `append`  |
+| `--database`    | `mpat`     | Destination ClickHouse database                        |
+| `--lite`        | `true`     | Use ResultsLiteSchema (fewer columns, faster fetch)    |
+| `--chunk-size`  | `500000`   | Number of rows per streaming chunk                     |
+| `--ewma-alpha`  | `0.2`      | Alpha parameter for ETA estimation                     |
 | `--table`       | —          | Mode 1: fetch a specific source table by name          |
 | `--measurement` | —          | Mode 2: fetch all result tables for a measurement UUID |
 | `--from`        | —          | Mode 3: start of date range (RFC3339)                  |
@@ -142,8 +150,8 @@ mp fetch iris-results my_results \
 #### Example output
 
 ```
-found 2 table(s)   policy: replace
-total: 147 chunks across 2 table(s)
+found 2 table(s), policy is set to 'replace'
+total of 147 chunk(s) will be fetched.
 [1/2] results__b78e5bf4_...   58,365,836 rows   117 chunks
       chunk 1/1/147   |   4s   |   119,047 rows/s   |   Jun 2, 8:12pm (in ~10m14s)
       chunk 2/2/147   |   4s   |   123,451 rows/s   |   Jun 2, 8:11pm (in ~9m58s)
@@ -153,30 +161,33 @@ total: 147 chunks across 2 table(s)
 
 ---
 
-### `mp compute results-fies <input-table> <output-table>`
+### `mp compute fies <input-table> <output-table>`
 
 Computes Forwarding Info Elements (FIEs) from a raw Iris results table and writes them into a destination ClickHouse table. The computation runs entirely server-side within ClickHouse using keyset-paginated chunks, with no data movement through the client.
 
-A FIE represents a observed forwarding step between two consecutive TTL hops within the same flow. Given a flow with probe TTL values `h` and `h+1`, a FIE captures the near router (at TTL `h`) and the far router (at TTL `h+1`) along with their associated timestamps and reply addresses. Only flows where each TTL hop has exactly one distinct reply address are included (skip policy).
+A FIE represents an observed forwarding step between two consecutive TTL hops within the same flow. Given a flow with probe TTL values `h` and `h+1`, a FIE captures the near router (at TTL `h`) and the far router (at TTL `h+1`) along with their associated timestamps and reply addresses. Only flows where each TTL hop has exactly one distinct reply address are included (skip policy).
+
+Both `results` and `resultslite` source schemas are supported. The appropriate computation template is selected automatically based on the source table's schema.
 
 #### Flags
 
-| Flag               | Default   | Description                                          |
-| ------------------ | --------- | ---------------------------------------------------- |
-| `--database`       | `mpat`    | Destination ClickHouse database                      |
-| `--chunk-size`     | `1000000` | Number of destination prefixes per chunk             |
-| `--rtt-resolution` | `0.1`     | RTT resolution in milliseconds (Iris default: `0.1`) |
+| Flag               | Default   | Description                                           |
+| ------------------ | --------- | ----------------------------------------------------- |
+| `--policy`         | `append`  | Write policy: `replace`, `truncate`, `fail`, `append` |
+| `--database`       | `mpat`    | Destination ClickHouse database                       |
+| `--chunk-size`     | `1000000` | Number of destination prefixes per chunk              |
+| `--rtt-resolution` | `0.1`     | RTT resolution in milliseconds (Iris default: `0.1`)  |
 
 #### Example
 
 ```bash
-mp compute results-fies iris_results__20260601 iris_fies__20260601
+mp compute fies iris_resultslite__20260601 iris_fies__20260601
 ```
 
 #### Example output
 
 ```
-computing fies: iris_results__20260601 -> mpat.iris_fies__20260601
+computing [results to fies]: mpat.iris_resultslite__20260601 -> mpat.iris_fies__20260601
 [chunk 1] cursor=::                       last=::ffff:1.199.230.219   rows=3384343  elapsed=3.5s   total=3384343
 [chunk 2] cursor=::ffff:1.199.230.219     last=::ffff:2.x.x.x        rows=3291872  elapsed=3.2s   total=6676215
 ...
