@@ -42,7 +42,7 @@ type DatabaseTable struct {
 }
 
 type Store struct {
-	conn       clickhouse.Conn
+	clickhouse.Conn
 	config     *StoreConfig
 	httpClient *http.Client
 	httpHost   string
@@ -122,7 +122,7 @@ func NewStore(config *StoreConfig) (*Store, error) {
 	httpHost := hostname + ":8123"
 
 	return &Store{
-		conn:       conn,
+		Conn:       conn,
 		config:     config,
 		httpClient: &http.Client{},
 		httpHost:   httpHost,
@@ -202,7 +202,7 @@ func (s *Store) PrepareTable(ctx context.Context, writePolicy PreparationPolicy,
 // or nil if the table does not exist.
 func (s *Store) TableSchema(ctx context.Context, dest DatabaseTable) (*schema.DynamicSchema, error) {
 	var exists uint64
-	err := s.conn.QueryRow(ctx,
+	err := s.QueryRow(ctx,
 		"SELECT count() FROM system.tables WHERE database = ? AND name = ?",
 		dest.Database, dest.Table,
 	).Scan(&exists)
@@ -214,7 +214,7 @@ func (s *Store) TableSchema(ctx context.Context, dest DatabaseTable) (*schema.Dy
 	}
 
 	var ddl string
-	err = s.conn.QueryRow(ctx,
+	err = s.QueryRow(ctx,
 		"SELECT create_table_query FROM system.tables WHERE database = ? AND name = ?",
 		dest.Database, dest.Table,
 	).Scan(&ddl)
@@ -232,7 +232,7 @@ func (s *Store) TableSchema(ctx context.Context, dest DatabaseTable) (*schema.Dy
 // RowCount returns the number of rows in dest, or 0 if the table does not exist.
 func (s *Store) RowCount(ctx context.Context, dest DatabaseTable) (uint64, error) {
 	var exists uint64
-	err := s.conn.QueryRow(ctx,
+	err := s.QueryRow(ctx,
 		"SELECT count() FROM system.tables WHERE database = ? AND name = ?",
 		dest.Database, dest.Table,
 	).Scan(&exists)
@@ -244,18 +244,13 @@ func (s *Store) RowCount(ctx context.Context, dest DatabaseTable) (uint64, error
 	}
 
 	var count uint64
-	err = s.conn.QueryRow(ctx,
+	err = s.QueryRow(ctx,
 		fmt.Sprintf("SELECT count() FROM %s.%s", dest.Database, dest.Table),
 	).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("store: failed to count rows: %w", err)
 	}
 	return count, nil
-}
-
-// Exec runs a DDL or DML statement via the native driver.
-func (s *Store) Exec(ctx context.Context, query string, args ...any) error {
-	return s.conn.Exec(ctx, query, args...)
 }
 
 // InsertJSONL streams rows directly into ClickHouse via HTTP POST.

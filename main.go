@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/dioptra-io/ufuk-research/internal/service"
 	"github.com/dioptra-io/ufuk-research/internal/store"
 )
 
@@ -19,17 +20,25 @@ func main() {
 		panic(err)
 	}
 
-	schema, err := s.TableSchema(context.Background(), store.DatabaseTable{
-		Database: "mpat",
-		Table:    "my_fies2",
+	svc := service.NewFIEComputeService(s, service.FIEComputeConfig{
+		ChunkSize:         1_000_000,
+		RTTResolution:     0.1,
+		PreparationPolicy: store.PreparationPolicyAppend,
 	})
-	if err != nil {
-		panic(err)
+
+	source := store.DatabaseTable{
+		Database: "mpat",
+		Table:    "iris_results__20260601",
+	}
+	dest := store.DatabaseTable{
+		Database: "mpat",
+		Table:    "iris_fies__20260601_testttt",
 	}
 
-	fmt.Println(schema.Columns())
-	fmt.Printf("schema.SchemaName(): %v\n", schema.SchemaName())
-	fmt.Printf("schema.DDL(\"mpat\", \"new_table\"): %v\n", schema.DDL("mpat", "new_table"))
+	if err := svc.Compute(context.Background(), source, dest); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 func mustEnv(key string) string {

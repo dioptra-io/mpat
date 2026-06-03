@@ -4,7 +4,7 @@ import (
 	_ "embed"
 )
 
-//go:embed templates/fies.tmpl
+//go:embed templates/results.tmpl
 var resultsDDLTemplate string
 
 type ResultsSchema struct{}

@@ -102,6 +102,34 @@ func ParseColumnsFromDDL(ddl string) ([]Column, error) {
 	return columns, nil
 }
 
+// MissingColumns returns the non-materialized columns that are in a but not in b.
+func MissingColumns(a, b Schema) ([]string, error) {
+	aCols, err := a.Columns()
+	if err != nil {
+		return nil, err
+	}
+	bCols, err := b.Columns()
+	if err != nil {
+		return nil, err
+	}
+	index := make(map[string]string)
+	for _, col := range bCols {
+		if !col.Materialized {
+			index[col.Name] = col.Type
+		}
+	}
+	var missing []string
+	for _, col := range aCols {
+		if col.Materialized {
+			continue
+		}
+		if index[col.Name] != col.Type {
+			missing = append(missing, col.Name)
+		}
+	}
+	return missing, nil
+}
+
 // parseColumnsFromDDLTemplate renders the DDL template with dummy values and parses
 // the resulting CREATE TABLE statement to extract column definitions.
 func parseColumnsFromDDLTemplate(ddlTemplate string) ([]Column, error) {
