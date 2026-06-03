@@ -4,16 +4,16 @@ import (
 	_ "embed"
 )
 
-//go:embed templates/resultslite.sql
+//go:embed templates/resultslite.tmpl
 var resultsliteDDLTemplate string
 
-type ResultsliteSchema struct{}
+type ResultsLiteSchema struct{}
 
-func (s ResultsliteSchema) SchemaName() string {
+func (s ResultsLiteSchema) SchemaName() string {
 	return "resultslite"
 }
 
-func (s ResultsliteSchema) DDL(database, table string) string {
+func (s ResultsLiteSchema) DDL(database, table string) string {
 	str, err := renderDDLTemplate(resultsliteDDLTemplate, database, table)
 	if err != nil {
 		panic(err)
@@ -21,6 +21,6 @@ func (s ResultsliteSchema) DDL(database, table string) string {
 	return str
 }
 
-func (s ResultsliteSchema) Columns() ([]Column, error) {
+func (s ResultsLiteSchema) Columns() ([]Column, error) {
 	return parseColumnsFromDDLTemplate(resultsliteDDLTemplate)
 }

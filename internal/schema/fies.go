@@ -4,16 +4,16 @@ import (
 	_ "embed"
 )
 
-//go:embed templates/fies.sql
+//go:embed templates/fies.tmpl
 var fiesDDLTemplate string
 
-type FiesSchema struct{}
+type FIEsSchema struct{}
 
-func (s FiesSchema) SchemaName() string {
+func (s FIEsSchema) SchemaName() string {
 	return "fies"
 }
 
-func (s FiesSchema) DDL(database, table string) string {
+func (s FIEsSchema) DDL(database, table string) string {
 	str, err := renderDDLTemplate(fiesDDLTemplate, database, table)
 	if err != nil {
 		panic(err)
@@ -21,6 +21,6 @@ func (s FiesSchema) DDL(database, table string) string {
 	return str
 }
 
-func (s FiesSchema) Columns() ([]Column, error) {
+func (s FIEsSchema) Columns() ([]Column, error) {
 	return parseColumnsFromDDLTemplate(fiesDDLTemplate)
 }
