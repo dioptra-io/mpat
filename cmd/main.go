@@ -14,8 +14,8 @@ func main() {
 		SilenceUsage: true,
 	}
 
-	rootCmd.AddCommand(fetchCmd())
-	rootCmd.AddCommand(computeCmd())
+	// rootCmd.AddCommand(fetchCmd())
+	// rootCmd.AddCommand(computeCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

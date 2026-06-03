@@ -16,8 +16,6 @@ const (
 	pageLimit       = 200
 )
 
-// ── Config ───────────────────────────────────────────────────────────────────
-
 type Config struct {
 	Username string
 	Password string
@@ -30,8 +28,6 @@ func (c *Config) endpoint() string {
 	}
 	return strings.TrimRight(c.Endpoint, "/")
 }
-
-// ── Client ───────────────────────────────────────────────────────────────────
 
 type IrisClient struct {
 	config   Config
@@ -57,8 +53,6 @@ func NewIrisClient(cfg Config) (*IrisClient, error) {
 	}
 	return c, nil
 }
-
-// ── Auth ─────────────────────────────────────────────────────────────────────
 
 // Login authenticates with the Iris API and stores the JWT token in memory.
 func (c *IrisClient) Login() error {
@@ -108,8 +102,6 @@ func (c *IrisClient) Logout() error {
 	return nil
 }
 
-// ── Services ─────────────────────────────────────────────────────────────────
-
 // Services returns the external service credentials (ClickHouse, S3).
 // Results are cached and refreshed automatically when expired.
 func (c *IrisClient) Services() (ExternalServices, error) {
@@ -134,8 +126,6 @@ func (c *IrisClient) clickhouseCredentials() (ClickHouseCredentials, error) {
 	}
 	return svc.ClickHouse, nil
 }
-
-// ── Measurement Query Builder ─────────────────────────────────────────────────
 
 // MeasurementQueryBuilder builds and executes a filtered measurement list query.
 type MeasurementQueryBuilder struct {
@@ -254,8 +244,6 @@ func (c *IrisClient) fetchAllMeasurements(state MeasurementAgentState, cutoff *t
 
 	return all, nil
 }
-
-// ── ClickHouse Query Builder ──────────────────────────────────────────────────
 
 // clickhouseFormat represents a ClickHouse output format.
 type clickhouseFormat string

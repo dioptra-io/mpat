@@ -14,7 +14,7 @@ import (
 	_ "embed"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
-	"github.com/dioptra-io/ufuk-research/internal/schemas"
+	"github.com/dioptra-io/ufuk-research/internal/schema"
 )
 
 const (
@@ -148,7 +148,7 @@ func NewStore(config *StoreConfig) (*Store, error) {
 //
 //   - StorePolicyAppend:   Creates the destination table if it does not exist, then
 //     leaves any existing rows intact. New rows will be appended on insert.
-func (s *Store) PrepareTable(ctx context.Context, writePolicy PreparationPolicy, dest DatabaseTable, schemaInterface schemas.Schema) error {
+func (s *Store) PrepareTable(ctx context.Context, writePolicy PreparationPolicy, dest DatabaseTable, schemaInterface schema.Schema) error {
 	schema := schemaInterface.DDL(dest.Database, dest.Table)
 	qualified := fmt.Sprintf("%s.%s", dest.Database, dest.Table)
 
@@ -200,7 +200,7 @@ func (s *Store) PrepareTable(ctx context.Context, writePolicy PreparationPolicy,
 
 // TableSchema returns the schema of the given table as a DynamicSchema,
 // or nil if the table does not exist.
-func (s *Store) TableSchema(ctx context.Context, dest DatabaseTable) (*schemas.DynamicSchema, error) {
+func (s *Store) TableSchema(ctx context.Context, dest DatabaseTable) (*schema.DynamicSchema, error) {
 	var exists uint64
 	err := s.conn.QueryRow(ctx,
 		"SELECT count() FROM system.tables WHERE database = ? AND name = ?",
@@ -222,7 +222,7 @@ func (s *Store) TableSchema(ctx context.Context, dest DatabaseTable) (*schemas.D
 		return nil, fmt.Errorf("store: failed to get table DDL: %w", err)
 	}
 
-	schema, err := schemas.NewDynamicSchema(ddl)
+	schema, err := schema.NewDynamicSchema(ddl)
 	if err != nil {
 		return nil, fmt.Errorf("store: failed to parse table schema: %w", err)
 	}
