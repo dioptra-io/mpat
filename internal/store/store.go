@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"text/template"
 	"time"
 
 	_ "embed"
@@ -16,49 +15,10 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 )
 
-const (
-	defaultDatabase = "mpat"
-)
-
-//go:embed sql/results.sql
-var resultsDDLTemplate string
-
-// ── Config ───────────────────────────────────────────────────────────────────
-
 type StoreConfig struct {
 	ConnectionString string
 	Database         string // defaults to "mpat"
 }
-
-// ── DestTable ─────────────────────────────────────────────────────────────────
-
-type DestTable struct {
-	Database string
-	Table    string
-}
-
-// ── Policy ───────────────────────────────────────────────────────────────────
-
-type Policy string
-
-const (
-	PolicyReplace  Policy = "replace"
-	PolicyTruncate Policy = "truncate"
-	PolicyFail     Policy = "fail"
-	PolicyAppend   Policy = "append"
-)
-
-// ── insertFormat ─────────────────────────────────────────────────────────────
-
-type insertFormat string
-
-const (
-	FormatJSON      insertFormat = "JSONEachRow"
-	FormatRowBinary insertFormat = "RowBinaryWithNamesAndTypes"
-)
-
-// ── Store ────────────────────────────────────────────────────────────────────
-
 type Store struct {
 	conn       clickhouse.Conn
 	config     StoreConfig
@@ -125,35 +85,20 @@ func NewStore(cfg StoreConfig) (*Store, error) {
 	}, nil
 }
 
-// ResultsDDL renders the results.sql template for the given destination table.
-func ResultsDDL(dest DestTable) (string, error) {
-	tmpl, err := template.New("results").Parse(resultsDDLTemplate)
-	if err != nil {
-		return "", fmt.Errorf("store: failed to parse results DDL template: %w", err)
-	}
-
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, dest); err != nil {
-		return "", fmt.Errorf("store: failed to render results DDL template: %w", err)
-	}
-
-	return buf.String(), nil
-}
-
 // ── Put ──────────────────────────────────────────────────────────────────────
 
 // Put writes a JSONEachRow stream into dest according to the given policy.
-func (s *Store) Put(policy Policy, dest DestTable, schema string, rows io.ReadCloser) error {
+func (s *Store) Put(policy Policy, dest DatabaseTable, schema string, rows io.ReadCloser) error {
 	return s.put(policy, dest, schema, rows, FormatJSON)
 }
 
 // PutRowBinary writes a RowBinaryWithNamesAndTypes stream into dest according to the given policy.
-func (s *Store) PutRowBinary(policy Policy, dest DestTable, schema string, rows io.ReadCloser) error {
+func (s *Store) PutRowBinary(policy Policy, dest DatabaseTable, schema string, rows io.ReadCloser) error {
 	return s.put(policy, dest, schema, rows, FormatRowBinary)
 }
 
 // put is the shared implementation for Put and PutRowBinary.
-func (s *Store) put(policy Policy, dest DestTable, schema string, rows io.ReadCloser, format insertFormat) error {
+func (s *Store) put(policy Policy, dest DatabaseTable, schema string, rows io.ReadCloser, format insertFormat) error {
 	defer rows.Close()
 
 	ctx := context.Background()
@@ -222,7 +167,7 @@ func FormatCount(n int64) string {
 }
 
 // rowCount returns the number of rows in dest, or 0 if the table does not exist.
-func (s *Store) rowCount(ctx context.Context, dest DestTable) (uint64, error) {
+func (s *Store) rowCount(ctx context.Context, dest DatabaseTable) (uint64, error) {
 	var exists uint64
 	err := s.conn.QueryRow(ctx,
 		"SELECT count() FROM system.tables WHERE database = ? AND name = ?",
@@ -252,7 +197,7 @@ func (s *Store) exec(ctx context.Context, query string) error {
 
 // insert streams rows directly into ClickHouse via HTTP POST.
 // If the stream is gzip-compressed, it is decompressed transparently before sending.
-func (s *Store) insert(dest DestTable, rows io.Reader, format insertFormat) error {
+func (s *Store) insert(dest DatabaseTable, rows io.Reader, format insertFormat) error {
 	query := fmt.Sprintf("INSERT INTO %s.%s FORMAT %s", dest.Database, dest.Table, format)
 
 	params := url.Values{}

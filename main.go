@@ -23,7 +23,7 @@ func main() {
 
 	ctx := context.Background()
 
-	dest := store.DestTable{
+	dest := store.DatabaseTable{
 		Database: "mpat",
 		Table:    "fies",
 	}

@@ -19,7 +19,7 @@ const (
 	zeroCursor           = "::"
 )
 
-//go:embed sql/fies.sql
+//go:embed sql/fies_create.sql
 var fiesDDLTemplate string
 
 //go:embed sql/fies_insert.sql
@@ -58,7 +58,7 @@ type fiesTemplateData struct {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 // CreateFiesTable creates the fies table if it does not exist.
-func (s *Store) CreateFiesTable(ctx context.Context, dest DestTable) error {
+func (s *Store) CreateFiesTable(ctx context.Context, dest DatabaseTable) error {
 	ddl, err := renderTemplate("fies_ddl", fiesDDLTemplate, fiesTemplateData{
 		Database: dest.Database,
 		Table:    dest.Table,
@@ -75,7 +75,7 @@ func (s *Store) CreateFiesTable(ctx context.Context, dest DestTable) error {
 // GenerateFies populates the fies table from the source table using
 // keyset-paginated chunks. It runs sequentially to ensure correct
 // sequence number assignment.
-func (s *Store) GenerateFies(ctx context.Context, dest DestTable, cfg FiesConfig) error {
+func (s *Store) GenerateFies(ctx context.Context, dest DatabaseTable, cfg FiesConfig) error {
 	cursor := zeroCursor
 	chunk := 0
 	totalRows := uint64(0)
@@ -155,7 +155,7 @@ func (s *Store) fiesLastPrefix(ctx context.Context, cfg FiesConfig, cursor strin
 }
 
 // insertFiesChunk runs the INSERT INTO fies SELECT ... for one chunk.
-func (s *Store) insertFiesChunk(ctx context.Context, dest DestTable, cfg FiesConfig, cursor string) error {
+func (s *Store) insertFiesChunk(ctx context.Context, dest DatabaseTable, cfg FiesConfig, cursor string) error {
 	query, err := renderTemplate("fies_insert", fiesInsertTemplate, fiesTemplateData{
 		Database:      dest.Database,
 		Table:         dest.Table,
