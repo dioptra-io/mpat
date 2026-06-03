@@ -66,7 +66,7 @@ func (s *Store) CreateFiesTable(ctx context.Context, dest DatabaseTable) error {
 	if err != nil {
 		return fmt.Errorf("fie: failed to render DDL template: %w", err)
 	}
-	if err := s.exec(ctx, ddl); err != nil {
+	if err := s.Exec(ctx, ddl); err != nil {
 		return fmt.Errorf("fie: failed to create fies table: %w", err)
 	}
 	return nil
@@ -85,7 +85,7 @@ func (s *Store) GenerateFies(ctx context.Context, dest DatabaseTable, cfg FiesCo
 		chunkStart := time.Now()
 
 		// Count rows before insert.
-		countBefore, err := s.rowCount(ctx, dest)
+		countBefore, err := s.RowCount(ctx, dest)
 		if err != nil {
 			return fmt.Errorf("fie: failed to count rows before chunk %d: %w", chunk, err)
 		}
@@ -108,7 +108,7 @@ func (s *Store) GenerateFies(ctx context.Context, dest DatabaseTable, cfg FiesCo
 		}
 
 		// Count rows after insert.
-		countAfter, err := s.rowCount(ctx, dest)
+		countAfter, err := s.RowCount(ctx, dest)
 		if err != nil {
 			return fmt.Errorf("fie: failed to count rows after chunk %d: %w", chunk, err)
 		}
@@ -168,7 +168,7 @@ func (s *Store) insertFiesChunk(ctx context.Context, dest DatabaseTable, cfg Fie
 		return fmt.Errorf("fie: failed to render insert template: %w", err)
 	}
 
-	if err := s.exec(ctx, query); err != nil {
+	if err := s.Exec(ctx, query); err != nil {
 		return fmt.Errorf("fie: failed to execute insert: %w", err)
 	}
 

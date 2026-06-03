@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -15,132 +16,162 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 )
 
-type StoreConfig struct {
-	ConnectionString string
-	Database         string // defaults to "mpat"
+const (
+	DefaultDatabase = "mpat"
+)
+
+// StorePolicy controls how the store behaves when inserting into a table that already contains data.
+type StorePolicy string
+
+const (
+	// StorePolicyReplace drops the table and recreates it before inserting.
+	StorePolicyReplace StorePolicy = "replace"
+	// StorePolicyTruncate truncates the table before inserting.
+	StorePolicyTruncate StorePolicy = "truncate"
+	// StorePolicyFail returns an error if the table contains any rows before inserting.
+	StorePolicyFail StorePolicy = "fail"
+	// StorePolicyAppend inserts without any prior checks or modifications.
+	StorePolicyAppend StorePolicy = "append"
+)
+
+// DatabaseTable identifies a table within a specific database.
+type DatabaseTable struct {
+	Database string
+	Table    string
 }
+
 type Store struct {
 	conn       clickhouse.Conn
-	config     StoreConfig
+	config     *StoreConfig
 	httpClient *http.Client
-	httpDSN    *dsn
+	httpHost   string
 }
 
-// dsn holds parsed connection info for HTTP inserts.
-type dsn struct {
-	host     string
-	database string
-	username string
-	password string
+type StoreConfig struct {
+	Host     string
+	Username string
+	Password string
+	Database string // defaults to "mpat"
 }
 
-func NewStore(cfg StoreConfig) (*Store, error) {
-	if cfg.ConnectionString == "" {
-		return nil, fmt.Errorf("store: connection string is required")
+func (c *StoreConfig) Validate() error {
+	if c.Host == "" {
+		return fmt.Errorf("store: host is required")
 	}
-	if cfg.Database == "" {
-		cfg.Database = defaultDatabase
+	if c.Username == "" {
+		return fmt.Errorf("store: username is required")
 	}
+	if c.Password == "" {
+		return fmt.Errorf("store: password is required")
+	}
+	if c.Database == "" {
+		c.Database = DefaultDatabase
+	}
+	return nil
+}
 
-	opts, err := clickhouse.ParseDSN(cfg.ConnectionString)
+func ConfigFromDSN(dsn string) (*StoreConfig, error) {
+	opts, err := clickhouse.ParseDSN(dsn)
 	if err != nil {
-		return nil, fmt.Errorf("store: failed to parse connection string: %w", err)
+		return nil, fmt.Errorf("store: failed to parse DSN: %w", err)
+	}
+	host := ""
+	if len(opts.Addr) > 0 {
+		host = opts.Addr[0]
+	}
+	return &StoreConfig{
+		Host:     host,
+		Username: opts.Auth.Username,
+		Password: opts.Auth.Password,
+		Database: opts.Auth.Database,
+	}, nil
+}
+
+func NewStore(config *StoreConfig) (*Store, error) {
+	if config.Host == "" {
+		return nil, fmt.Errorf("store: host is required")
+	}
+	if config.Database == "" {
+		config.Database = DefaultDatabase
 	}
 
-	conn, err := clickhouse.Open(opts)
+	conn, err := clickhouse.Open(&clickhouse.Options{
+		Addr: []string{config.Host},
+		Auth: clickhouse.Auth{
+			Database: config.Database,
+			Username: config.Username,
+			Password: config.Password,
+		},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("store: failed to open connection: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
 	if err := conn.Ping(ctx); err != nil {
 		return nil, fmt.Errorf("store: failed to ping clickhouse: %w", err)
 	}
 
-	// Parse HTTP DSN for streaming inserts (port 8123 instead of 9000).
-	u, err := url.Parse(cfg.ConnectionString)
+	// Derive HTTP host: same hostname, port 8123.
+	hostname, _, err := net.SplitHostPort(config.Host)
 	if err != nil {
-		return nil, fmt.Errorf("store: failed to parse DSN for HTTP: %w", err)
+		hostname = config.Host
 	}
-	host := u.Hostname() + ":8123"
-	username := u.User.Username()
-	password, _ := u.User.Password()
-	database := cfg.Database
-	if u.Path != "" && u.Path != "/" {
-		database = u.Path[1:]
-	}
+	httpHost := hostname + ":8123"
 
 	return &Store{
 		conn:       conn,
-		config:     cfg,
+		config:     config,
 		httpClient: &http.Client{},
-		httpDSN: &dsn{
-			host:     host,
-			database: database,
-			username: username,
-			password: password,
-		},
+		httpHost:   httpHost,
 	}, nil
 }
 
-// ── Put ──────────────────────────────────────────────────────────────────────
-
 // Put writes a JSONEachRow stream into dest according to the given policy.
-func (s *Store) Put(policy Policy, dest DatabaseTable, schema string, rows io.ReadCloser) error {
-	return s.put(policy, dest, schema, rows, FormatJSON)
-}
-
-// PutRowBinary writes a RowBinaryWithNamesAndTypes stream into dest according to the given policy.
-func (s *Store) PutRowBinary(policy Policy, dest DatabaseTable, schema string, rows io.ReadCloser) error {
-	return s.put(policy, dest, schema, rows, FormatRowBinary)
-}
-
-// put is the shared implementation for Put and PutRowBinary.
-func (s *Store) put(policy Policy, dest DatabaseTable, schema string, rows io.ReadCloser, format insertFormat) error {
-	defer rows.Close()
+func (s *Store) Put(policy StorePolicy, dest DatabaseTable, schema string, rows io.ReadCloser) error {
+	defer func() { _ = rows.Close() }()
 
 	ctx := context.Background()
 	qualified := fmt.Sprintf("%s.%s", dest.Database, dest.Table)
 
 	switch policy {
-	case PolicyReplace:
-		if err := s.exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", qualified)); err != nil {
+	case StorePolicyReplace:
+		if err := s.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", qualified)); err != nil {
 			return fmt.Errorf("store: replace: failed to drop table: %w", err)
 		}
-		if err := s.exec(ctx, schema); err != nil {
+		if err := s.Exec(ctx, schema); err != nil {
 			return fmt.Errorf("store: replace: failed to create table: %w", err)
 		}
 
-	case PolicyTruncate:
-		if err := s.exec(ctx, schema); err != nil {
+	case StorePolicyTruncate:
+		if err := s.Exec(ctx, schema); err != nil {
 			return fmt.Errorf("store: truncate: failed to create table if not exists: %w", err)
 		}
-		count, err := s.rowCount(ctx, dest)
+		count, err := s.RowCount(ctx, dest)
 		if err != nil {
 			return fmt.Errorf("store: truncate: failed to count rows: %w", err)
 		}
 		if count > 0 {
-			if err := s.exec(ctx, fmt.Sprintf("TRUNCATE TABLE %s", qualified)); err != nil {
+			if err := s.Exec(ctx, fmt.Sprintf("TRUNCATE TABLE %s", qualified)); err != nil {
 				return fmt.Errorf("store: truncate: failed to truncate table: %w", err)
 			}
 		}
 
-	case PolicyFail:
-		count, err := s.rowCount(ctx, dest)
+	case StorePolicyFail:
+		count, err := s.RowCount(ctx, dest)
 		if err != nil {
 			return fmt.Errorf("store: fail: failed to count rows: %w", err)
 		}
 		if count > 0 {
 			return fmt.Errorf("store: fail: destination table %s is not empty (%d rows)", qualified, count)
 		}
-		if err := s.exec(ctx, schema); err != nil {
+		if err := s.Exec(ctx, schema); err != nil {
 			return fmt.Errorf("store: fail: failed to create table if not exists: %w", err)
 		}
 
-	case PolicyAppend:
-		if err := s.exec(ctx, schema); err != nil {
+	case StorePolicyAppend:
+		if err := s.Exec(ctx, schema); err != nil {
 			return fmt.Errorf("store: append: failed to create table if not exists: %w", err)
 		}
 
@@ -148,26 +179,11 @@ func (s *Store) put(policy Policy, dest DatabaseTable, schema string, rows io.Re
 		return fmt.Errorf("store: unknown policy %q", policy)
 	}
 
-	return s.insert(dest, rows, format)
+	return s.insertHTTP(dest, rows)
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-// FormatCount formats an integer with thousands separators.
-func FormatCount(n int64) string {
-	s := fmt.Sprintf("%d", n)
-	out := make([]byte, 0, len(s)+len(s)/3)
-	for i, c := range s {
-		if i > 0 && (len(s)-i)%3 == 0 {
-			out = append(out, ',')
-		}
-		out = append(out, byte(c))
-	}
-	return string(out)
-}
-
-// rowCount returns the number of rows in dest, or 0 if the table does not exist.
-func (s *Store) rowCount(ctx context.Context, dest DatabaseTable) (uint64, error) {
+// RowCount returns the number of rows in dest, or 0 if the table does not exist.
+func (s *Store) RowCount(ctx context.Context, dest DatabaseTable) (uint64, error) {
 	var exists uint64
 	err := s.conn.QueryRow(ctx,
 		"SELECT count() FROM system.tables WHERE database = ? AND name = ?",
@@ -190,15 +206,16 @@ func (s *Store) rowCount(ctx context.Context, dest DatabaseTable) (uint64, error
 	return count, nil
 }
 
-// exec runs a DDL or DML statement via the native driver.
-func (s *Store) exec(ctx context.Context, query string) error {
-	return s.conn.Exec(ctx, query)
+// Exec runs a DDL or DML statement via the native driver.
+func (s *Store) Exec(ctx context.Context, query string, args ...any) error {
+	return s.conn.Exec(ctx, query, args...)
 }
 
-// insert streams rows directly into ClickHouse via HTTP POST.
+// insertHTTP streams rows directly into ClickHouse via HTTP POST.
 // If the stream is gzip-compressed, it is decompressed transparently before sending.
-func (s *Store) insert(dest DatabaseTable, rows io.Reader, format insertFormat) error {
-	query := fmt.Sprintf("INSERT INTO %s.%s FORMAT %s", dest.Database, dest.Table, format)
+// The format is required to be JSONEachRow
+func (s *Store) insertHTTP(dest DatabaseTable, rows io.Reader) error {
+	query := fmt.Sprintf("INSERT INTO %s.%s FORMAT JSONEachRow", dest.Database, dest.Table)
 
 	params := url.Values{}
 	params.Set("query", query)
@@ -207,7 +224,7 @@ func (s *Store) insert(dest DatabaseTable, rows io.Reader, format insertFormat) 
 	params.Set("receive_timeout", "3600")
 	params.Set("send_timeout", "3600")
 
-	u := fmt.Sprintf("http://%s/?%s", s.httpDSN.host, params.Encode())
+	u := fmt.Sprintf("http://%s/?%s", s.httpHost, params.Encode())
 
 	// Peek at the first two bytes to detect gzip magic number (0x1f 0x8b).
 	buf := make([]byte, 2)
@@ -217,13 +234,13 @@ func (s *Store) insert(dest DatabaseTable, rows io.Reader, format insertFormat) 
 	}
 	peeked := io.MultiReader(bytes.NewReader(buf[:n]), rows)
 
-	var body io.Reader = peeked
+	var body = peeked
 	if n == 2 && buf[0] == 0x1f && buf[1] == 0x8b {
 		gz, err := gzip.NewReader(peeked)
 		if err != nil {
 			return fmt.Errorf("store: failed to create gzip reader: %w", err)
 		}
-		defer gz.Close()
+		defer func() { _ = gz.Close() }()
 		body = gz
 	}
 
@@ -231,7 +248,7 @@ func (s *Store) insert(dest DatabaseTable, rows io.Reader, format insertFormat) 
 	if err != nil {
 		return fmt.Errorf("store: failed to build insert request: %w", err)
 	}
-	req.SetBasicAuth(s.httpDSN.username, s.httpDSN.password)
+	req.SetBasicAuth(s.config.Username, s.config.Password)
 	req.Header.Set("Content-Type", "application/octet-stream")
 
 	resp, err := s.httpClient.Do(req)
