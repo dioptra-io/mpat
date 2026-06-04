@@ -17,6 +17,7 @@ Internet Measurement Platforms (IMPs) such as [Iris](https://iris.dioptra.io) co
 **MPAT** addresses this by providing:
 
 - A client for the Iris measurement platform API.
+- A client for the RIPE Stat Data API for fetching BGP prefix data.
 - A high-throughput pipeline for fetching probe results into a local ClickHouse instance.
 - A computation pipeline for deriving higher-level structures such as Forwarding Info Elements (FIEs) from raw probe results.
 - A flexible query interface for filtering measurements by state, date range, and tag.
@@ -28,21 +29,24 @@ Internet Measurement Platforms (IMPs) such as [Iris](https://iris.dioptra.io) co
 MPAT is structured around the following internal packages:
 
 - **`internal/iris`** — Client for the Iris API. Handles JWT authentication, measurement queries, and ClickHouse result retrieval via HTTP streaming.
+- **`internal/ripe`** — Client for the RIPE Stat Data API. Handles BGP prefix queries using a builder pattern, with support for historical snapshots via time-of-day or raw timestamp.
 - **`internal/store`** — Low-level client for the local ClickHouse instance. Handles table creation, write policies, and bulk insertion.
-- **`internal/schema`** — Schema definitions for all supported table types (`results`, `resultslite`, `fies`). Provides schema introspection, compatibility checking, DDL rendering, and DDL parsing via the AfterShip ClickHouse SQL parser.
-- **`internal/service`** — Business logic for fetch and compute operations. Each service owns its SQL templates and orchestrates store and iris client interactions.
+- **`internal/schema`** — Schema definitions for all supported table types (`results`, `resultslite`, `fies`, `ripeprefixes`). Provides schema introspection, compatibility checking, DDL rendering, and DDL parsing via the AfterShip ClickHouse SQL parser.
+- **`internal/service`** — Business logic for fetch and compute operations. Each service owns its SQL templates and orchestrates store and client interactions.
 
 Data flows as follows:
 
 ```
-Iris ClickHouse  →  mp fetch (HTTP stream)  →  Local ClickHouse
-                                                      ↓
-                                               mp compute fies
-                                                      ↓
-                                            Derived ClickHouse tables (e.g. FIEs)
+Iris ClickHouse      →  mp fetch iris-results (HTTP stream)  →  Local ClickHouse
+                                                                       ↓
+                                                              mp compute fies
+                                                                       ↓
+                                                         Derived tables (e.g. FIEs)
+
+RIPE Stat API        →  mp fetch ripe-prefixes (native insert)  →  Local ClickHouse
 ```
 
-No intermediate deserialization occurs during fetch — the JSON stream from Iris is piped directly into the local ClickHouse instance. Compute operations run entirely server-side within ClickHouse.
+No intermediate deserialization occurs during Iris fetch — the JSON stream is piped directly into ClickHouse. RIPE prefix data is inserted via the native ClickHouse driver. Compute operations run entirely server-side within ClickHouse.
 
 ---
 
@@ -68,13 +72,14 @@ This builds the `mp` binary and installs it to `$GOPATH/bin`.
 
 ## Environment Variables
 
-| Variable          | Required | Description                                                        |
-| ----------------- | -------- | ------------------------------------------------------------------ |
-| `IRIS_USERNAME`   | Yes      | Iris account email                                                 |
-| `IRIS_PASSWORD`   | Yes      | Iris account password                                              |
-| `IRIS_ENDPOINT`   | No       | Iris API endpoint (default: `https://api.iris.dioptra.io`)         |
-| `MPAT_CLICKHOUSE` | Yes      | ClickHouse DSN (e.g. `clickhouse://user:pass@localhost:9000/mpat`) |
-| `MPAT_DATABASE`   | No       | Destination ClickHouse database (default: `mpat`)                  |
+| Variable                  | Required | Description                                                        |
+| ------------------------- | -------- | ------------------------------------------------------------------ |
+| `IRIS_USERNAME`           | Yes      | Iris account email                                                 |
+| `IRIS_PASSWORD`           | Yes      | Iris account password                                              |
+| `IRIS_ENDPOINT`           | No       | Iris API endpoint (default: `https://api.iris.dioptra.io`)         |
+| `MPAT_CLICKHOUSE`         | Yes      | ClickHouse DSN (e.g. `clickhouse://user:pass@localhost:9000/mpat`) |
+| `MPAT_DATABASE`           | No       | Destination ClickHouse database (default: `mpat`)                  |
+| `MPAT_RIPE_STAT_ENDPOINT` | No       | RIPE Stat API endpoint (default: `https://stat.ripe.net`)          |
 
 ---
 
@@ -158,6 +163,90 @@ total of 147 chunk(s) will be fetched.
 [2/2] results__c4a1_...   44,619,062 rows   30 chunks
       chunk 1/118/147   |   4s   |   121,951 rows/s   |   Jun 2, 8:10pm (in ~2m1s)
 ```
+
+---
+
+### `mp fetch ripe-prefixes <dest-table>`
+
+Fetches BGP prefixes originated by a set of ASes from the RIPE Stat RIS API and inserts them into a local ClickHouse table. Data is retrieved from historical RIS snapshots, which are available three times per day at 00:00, 08:00, and 16:00 UTC.
+
+Exactly one of `--asns` or `--tier1` must be specified to select the ASes to query. Exactly one of `--date` or `--timestamp` must be specified to select the snapshot time.
+
+#### Flags
+
+| Flag          | Default | Description                                                                      |
+| ------------- | ------- | -------------------------------------------------------------------------------- |
+| `--policy`    | `fail`  | Write policy: `replace`, `truncate`, `fail`, `append`                            |
+| `--database`  | `mpat`  | Destination ClickHouse database                                                  |
+| `--asns`      | —       | Comma-separated list of ASNs (e.g. `3356,1299,3257`)                             |
+| `--tier1`     | `false` | Use the hardcoded list of 16 tier-1 ASNs                                         |
+| `--date`      | —       | Date for the snapshot (e.g. `2026-06-01`), used with `--snapshot`                |
+| `--snapshot`  | `dawn`  | Time of day: `dawn` (08:00 UTC), `day` (16:00 UTC), `night` (00:00 UTC next day) |
+| `--timestamp` | —       | Raw RFC3339 timestamp, alternative to `--date` + `--snapshot`                    |
+
+#### Tier-1 ASNs
+
+The `--tier1` flag uses the following 16 ASNs:
+
+| ASN   | Operator                 |
+| ----- | ------------------------ |
+| 3356  | Lumen (Level 3)          |
+| 1299  | Arelion                  |
+| 3257  | GTT                      |
+| 2914  | NTT                      |
+| 6453  | Tata                     |
+| 6461  | Zayo                     |
+| 6762  | Sparkle (Telecom Italia) |
+| 3491  | PCCW Global              |
+| 5511  | Orange                   |
+| 12956 | Telxius (Telefonica)     |
+| 3320  | Deutsche Telekom         |
+| 6830  | Liberty Global           |
+| 7018  | AT&T                     |
+| 701   | Verizon                  |
+| 174   | Cogent                   |
+| 6939  | Hurricane Electric       |
+
+#### Examples
+
+```bash
+# Fetch tier-1 ASNs at dawn on June 1st 2026
+mp fetch ripe-prefixes ripeprefixes_20260601 \
+  --tier1 \
+  --date 2026-06-01 \
+  --snapshot dawn
+
+# Fetch tier-1 ASNs at night (resolves to 2026-06-02 00:00 UTC)
+mp fetch ripe-prefixes ripeprefixes_20260601 \
+  --tier1 \
+  --date 2026-06-01 \
+  --snapshot night
+
+# Fetch specific ASNs using a raw timestamp
+mp fetch ripe-prefixes ripeprefixes_20260601 \
+  --asns 3356,1299,3257 \
+  --timestamp 2026-06-01T08:00:00Z
+
+# Append a second snapshot to an existing table
+mp fetch ripe-prefixes ripeprefixes_20260601 \
+  --tier1 \
+  --date 2026-06-01 \
+  --snapshot day \
+  --policy append
+```
+
+#### Output table schema
+
+| Column       | Type       | Description                                      |
+| ------------ | ---------- | ------------------------------------------------ |
+| `asn`        | `UInt32`   | AS number                                        |
+| `network`    | `IPv6`     | Prefix address (IPv4 mapped to `::ffff:x.x.x.x`) |
+| `prefix_len` | `UInt8`    | Prefix length                                    |
+| `ip_version` | `UInt8`    | MATERIALIZED: `4` for IPv4-mapped, `6` for IPv6  |
+| `query_time` | `DateTime` | RIS snapshot time                                |
+| `fetched_at` | `DateTime` | Time at which the data was fetched               |
+
+The table is ordered by `(asn, network, prefix_len)` for efficient per-ASN queries and prefix lookups. It is designed to work with ClickHouse's `IP_TRIE` dictionary layout for fast prefix matching against other tables.
 
 ---
 
