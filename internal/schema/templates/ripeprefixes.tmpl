@@ -1,0 +1,12 @@
+CREATE TABLE IF NOT EXISTS {{.Database}}.{{.Table}}
+(
+    `asn`        UInt32,
+    `network`    IPv6,
+    `prefix_len` UInt8,
+    `ip_version` UInt8 MATERIALIZED if(isIPv4String(toString(network)), 4, 6),
+    `query_time` DateTime CODEC(T64, ZSTD(1)),
+    `fetched_at` DateTime CODEC(T64, ZSTD(1))
+)
+ENGINE = MergeTree
+ORDER BY (asn, network, prefix_len)
+SETTINGS index_granularity = 8192;
