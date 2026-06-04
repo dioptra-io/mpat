@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -68,6 +69,7 @@ func (f *FetchService) targetSchema() schema.Schema {
 
 // Fetch fetches data from the given source tables into dest.
 func (f *FetchService) Fetch(ctx context.Context, sourceNames []string, dest store.DatabaseTable) error {
+	log := slog.Default()
 	targetSchema := f.targetSchema()
 
 	// Build column list from schema — only non-materialized columns.
@@ -84,7 +86,6 @@ func (f *FetchService) Fetch(ctx context.Context, sourceNames []string, dest sto
 	selectCols := strings.Join(colNames, ", ")
 
 	// Step 1: Pre-scan source tables.
-	fmt.Printf("found %d table(s), policy is set to '%s'\n", len(sourceNames), f.config.PreparationPolicy)
 	tables := make([]tableInfo, 0, len(sourceNames))
 	totalChunks := int64(0)
 	for _, name := range sourceNames {
@@ -99,7 +100,14 @@ func (f *FetchService) Fetch(ctx context.Context, sourceNames []string, dest sto
 		tables = append(tables, tableInfo{name: name, total: total, chunks: chunks})
 		totalChunks += chunks
 	}
-	fmt.Printf("total of %d chunk(s) will be fetched.\n", totalChunks)
+
+	log.InfoContext(ctx, "pre-scan complete",
+		"tables", len(tables),
+		"total_chunks", totalChunks,
+		"policy", f.config.PreparationPolicy,
+		"schema", targetSchema.SchemaName(),
+		"dest", fmt.Sprintf("%s.%s", dest.Database, dest.Table),
+	)
 
 	// Step 2: Prepare destination table.
 	if err := f.store.PrepareTable(ctx, f.config.PreparationPolicy, dest, targetSchema); err != nil {
@@ -127,10 +135,15 @@ func (f *FetchService) Fetch(ctx context.Context, sourceNames []string, dest sto
 	// Step 3: Fetch and write chunks.
 	var ewmaRate float64
 	globalChunk := int64(0)
+	start := time.Now()
 
 	for i, t := range tables {
-		fmt.Printf("[%d/%d] %s   %s rows   %d chunks\n",
-			i+1, len(tables), t.name, formatCount(t.total), t.chunks)
+		log.InfoContext(ctx, "fetching table",
+			"table", t.name,
+			"rows", t.total,
+			"chunks", t.chunks,
+			"progress", fmt.Sprintf("%d/%d", i+1, len(tables)),
+		)
 
 		for c := int64(0); c < t.chunks; c++ {
 			offset := c * int64(f.config.ChunkSize)
@@ -148,11 +161,11 @@ func (f *FetchService) Fetch(ctx context.Context, sourceNames []string, dest sto
 				return fmt.Errorf("[%d/%d] chunk %d: failed to query: %w", i+1, len(tables), c+1, err)
 			}
 
-			start := time.Now()
+			chunkStart := time.Now()
 			if err := f.store.InsertJSONL(dest, rows); err != nil {
 				return fmt.Errorf("[%d/%d] chunk %d: failed to write: %w", i+1, len(tables), c+1, err)
 			}
-			elapsed := time.Since(start)
+			elapsed := time.Since(chunkStart)
 
 			// Update EWMA rate (rows/sec).
 			currentRate := float64(chunkRows) / elapsed.Seconds()
@@ -176,14 +189,21 @@ func (f *FetchService) Fetch(ctx context.Context, sourceNames []string, dest sto
 				eta = "done"
 			}
 
-			fmt.Printf("      chunk %d/%d/%d   |   %s   |   %.0f rows/s   |   %s\n",
-				c+1, globalChunk, totalChunks,
-				elapsed.Round(time.Second),
-				ewmaRate,
-				eta,
+			log.InfoContext(ctx, "chunk complete",
+				"chunk", fmt.Sprintf("%d/%d/%d", c+1, globalChunk, totalChunks),
+				"rows", chunkRows,
+				"elapsed", elapsed.Round(time.Second),
+				"rows_per_sec", int(ewmaRate),
+				"eta", eta,
 			)
 		}
 	}
+
+	log.InfoContext(ctx, "fetch complete",
+		"tables", len(tables),
+		"total_chunks", totalChunks,
+		"elapsed", time.Since(start).Round(time.Second),
+	)
 
 	return nil
 }

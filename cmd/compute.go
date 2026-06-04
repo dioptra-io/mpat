@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/dioptra-io/ufuk-research/internal/service"
 	"github.com/dioptra-io/ufuk-research/internal/store"
@@ -14,9 +15,7 @@ func computeCmd() *cobra.Command {
 		Use:   "compute",
 		Short: "Compute derived tables from source data",
 	}
-
 	computeCmd.AddCommand(computeResultsFiesCmd())
-
 	return computeCmd
 }
 
@@ -51,6 +50,8 @@ func computeResultsFiesCmd() *cobra.Command {
 }
 
 func runResultsFies(ctx context.Context, inputTable, outputTable, policy string, chunkSize int, rttResolution float64) error {
+	log := slog.Default()
+
 	config, err := store.ConfigFromDSN(mustEnv("MPAT_CLICKHOUSE"))
 	if err != nil {
 		return fmt.Errorf("failed to parse config from DSN: %w", err)
@@ -76,7 +77,13 @@ func runResultsFies(ctx context.Context, inputTable, outputTable, policy string,
 		PreparationPolicy: store.PreparationPolicy(policy),
 	})
 
-	fmt.Printf("computing [results to fies]: %s.%s -> %s.%s\n", config.Database, inputTable, config.Database, outputTable)
+	log.InfoContext(ctx, "starting fie computation",
+		"source", fmt.Sprintf("%s.%s", config.Database, inputTable),
+		"dest", fmt.Sprintf("%s.%s", config.Database, outputTable),
+		"policy", policy,
+		"chunk_size", chunkSize,
+		"rtt_resolution", rttResolution,
+	)
 
 	if err := svc.Compute(ctx, source, dest); err != nil {
 		return fmt.Errorf("failed to compute fies: %w", err)

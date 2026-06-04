@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	_ "embed"
@@ -32,13 +33,6 @@ var fieInsertResultsLiteTemplate string
 
 //go:embed templates/fie_resultslite_cursor.tmpl
 var fieCursorResultsLiteTemplate string
-
-type sourceSchema int
-
-const (
-	sourceSchemaResults sourceSchema = iota
-	sourceSchemaResultsLite
-)
 
 type fieTemplateData struct {
 	SourceDatabase string
@@ -81,6 +75,8 @@ func NewFIEComputeService(s *store.Store, config FIEComputeConfig) *FIEComputeSe
 
 // Compute computes FIEs from source into dest.
 func (f *FIEComputeService) Compute(ctx context.Context, source, dest store.DatabaseTable) error {
+	log := slog.Default()
+
 	// Step 1: Validate source schema and detect type.
 	sourceSchema, err := f.store.TableSchema(ctx, source)
 	if err != nil {
@@ -101,12 +97,18 @@ func (f *FIEComputeService) Compute(ctx context.Context, source, dest store.Data
 		return fmt.Errorf("fie: source table %s.%s does not match any supported schema, missing columns: %v", source.Database, source.Table, missing)
 	}
 
+	log.InfoContext(ctx, "detected source schema",
+		"schema", detectedSchema.SchemaName(),
+		"source", fmt.Sprintf("%s.%s", source.Database, source.Table),
+		"dest", fmt.Sprintf("%s.%s", dest.Database, dest.Table),
+	)
+
 	// Step 2: Prepare destination table.
 	if err := f.store.PrepareTable(ctx, f.config.PreparationPolicy, dest, schema.FIEsSchema{}); err != nil {
 		return fmt.Errorf("fie: failed to prepare destination table: %w", err)
 	}
 
-	// Step 3: Run the keyset-paginated INSERT loop. NEEDS UPDATE
+	// Step 3: Run the keyset-paginated INSERT loop.
 	cursor := zeroCursor
 	chunk := 0
 	totalRows := uint64(0)
@@ -144,14 +146,25 @@ func (f *FIEComputeService) Compute(ctx context.Context, source, dest store.Data
 		rowsInserted := countAfter - countBefore
 		chunk++
 		totalRows += rowsInserted
-		fmt.Printf("[chunk %d] cursor=%-24s last=%-24s rows=%d elapsed=%s total=%d\n",
-			chunk, cursor, lastPrefix, rowsInserted, time.Since(chunkStart).Round(time.Millisecond), totalRows,
+
+		log.InfoContext(ctx, "chunk complete",
+			"chunk", chunk,
+			"cursor", cursor,
+			"last", lastPrefix,
+			"rows_inserted", rowsInserted,
+			"total_rows", totalRows,
+			"elapsed", time.Since(chunkStart).Round(time.Millisecond),
 		)
 
 		cursor = lastPrefix
 	}
 
-	fmt.Printf("done: %d chunks, %d rows, elapsed=%s\n", chunk, totalRows, time.Since(start).Round(time.Second))
+	log.InfoContext(ctx, "compute complete",
+		"chunks", chunk,
+		"total_rows", totalRows,
+		"elapsed", time.Since(start).Round(time.Second),
+	)
+
 	return nil
 }
 
