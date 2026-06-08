@@ -12,7 +12,9 @@ import (
 )
 
 const (
-	DefaultEndpoint = "https://stat.ripe.net"
+	DefaultEndpoint   = "https://stat.ripe.net"
+	DefaultMaxRetries = 3
+	DefaultRetryDelay = 2 * time.Second
 )
 
 // Tier1ASNs hardcodes the tier 1 ASNs retieved from Better Targeting document
@@ -41,6 +43,13 @@ type RipeConfig struct {
 	// Endpoint is the base URL for the RIPE Stat API.
 	// Defaults to https://stat.ripe.net.
 	Endpoint string
+	// MaxRetries is the maximum number of attempts for a failed request.
+	// Retries are only performed on network errors and 5xx responses.
+	// Defaults to DefaultMaxRetries.
+	MaxRetries int
+	// RetryDelay is the duration to wait between retry attempts.
+	// Defaults to DefaultRetryDelay.
+	RetryDelay time.Duration
 }
 
 func (c *RipeConfig) endpoint() string {
@@ -137,49 +146,75 @@ func (q *PrefixQuery) fetchASN(asn uint32) ([]Prefix, error) {
 	if !q.queryTime.IsZero() {
 		params.Set("query_time", q.queryTime.UTC().Format(time.RFC3339))
 	}
-
 	u := fmt.Sprintf("%s/data/ris-prefixes/data.json?%s", q.client.config.endpoint(), params.Encode())
 
-	resp, err := q.client.http.Get(u)
-	if err != nil {
-		return nil, fmt.Errorf("ripe: request failed for ASN %d: %w", asn, err)
+	maxRetries := q.client.config.MaxRetries
+	if maxRetries == 0 {
+		maxRetries = DefaultMaxRetries
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ripe: unexpected status %d for ASN %d", resp.StatusCode, asn)
-	}
-
-	var result risPrefixesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("ripe: failed to decode response for ASN %d: %w", asn, err)
-	}
-	if result.Status != "ok" {
-		return nil, fmt.Errorf("ripe: API returned status %q for ASN %d", result.Status, asn)
+	retryDelay := q.client.config.RetryDelay
+	if retryDelay == 0 {
+		retryDelay = DefaultRetryDelay
 	}
 
-	queryTime, err := time.Parse("2006-01-02T15:04:05", result.Data.QueryTime)
-	if err != nil {
-		return nil, fmt.Errorf("ripe: failed to parse query_time %q: %w", result.Data.QueryTime, err)
-	}
-
-	var prefixes []Prefix
-	for _, raw := range result.Data.Prefixes.V4.Originating {
-		p, err := parsePrefix(asn, raw, queryTime, false)
+	var lastErr error
+	for attempt := range maxRetries {
+		resp, err := q.client.http.Get(u)
 		if err != nil {
-			return nil, err
+			// Network error — retryable.
+			lastErr = fmt.Errorf("ripe: request failed for ASN %d: %w", asn, err)
+			if attempt < maxRetries-1 {
+				time.Sleep(retryDelay)
+			}
+			continue
 		}
-		prefixes = append(prefixes, p)
-	}
-	for _, raw := range result.Data.Prefixes.V6.Originating {
-		p, err := parsePrefix(asn, raw, queryTime, true)
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			lastErr = fmt.Errorf("ripe: unexpected status %d for ASN %d", resp.StatusCode, asn)
+			// Only retry on 5xx.
+			if resp.StatusCode >= 500 && attempt < maxRetries-1 {
+				time.Sleep(retryDelay)
+				continue
+			}
+			break
+		}
+
+		var result risPrefixesResponse
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close()
+			return nil, fmt.Errorf("ripe: failed to decode response for ASN %d: %w", asn, err)
+		}
+		resp.Body.Close()
+
+		if result.Status != "ok" {
+			return nil, fmt.Errorf("ripe: API returned status %q for ASN %d", result.Status, asn)
+		}
+
+		queryTime, err := time.Parse("2006-01-02T15:04:05", result.Data.QueryTime)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("ripe: failed to parse query_time %q: %w", result.Data.QueryTime, err)
 		}
-		prefixes = append(prefixes, p)
+
+		var prefixes []Prefix
+		for _, raw := range result.Data.Prefixes.V4.Originating {
+			p, err := parsePrefix(asn, raw, queryTime, false)
+			if err != nil {
+				return nil, err
+			}
+			prefixes = append(prefixes, p)
+		}
+		for _, raw := range result.Data.Prefixes.V6.Originating {
+			p, err := parsePrefix(asn, raw, queryTime, true)
+			if err != nil {
+				return nil, err
+			}
+			prefixes = append(prefixes, p)
+		}
+		return prefixes, nil
 	}
 
-	return prefixes, nil
+	return nil, fmt.Errorf("ripe: gave up after %d attempt(s) for ASN %d: %w", maxRetries, asn, lastErr)
 }
 
 // parsePrefix parses a prefix string like "67.24.0.0/13" or "2001:13b2::/32"

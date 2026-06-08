@@ -185,13 +185,15 @@ func runFetchIrisResults(ctx context.Context, destTable, database, policy, table
 
 func fetchRipePrefixesCmd() *cobra.Command {
 	var (
-		asnsFlag  string
-		tier1     bool
-		date      string
-		snapshot  string
-		timestamp string
-		policy    string
-		database  string
+		asnsFlag   string
+		tier1      bool
+		date       string
+		snapshot   string
+		timestamp  string
+		policy     string
+		database   string
+		maxRetries int
+		retryDelay time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -209,6 +211,8 @@ func fetchRipePrefixesCmd() *cobra.Command {
 				date,
 				snapshot,
 				timestamp,
+				maxRetries,
+				retryDelay,
 			)
 		},
 	}
@@ -220,11 +224,13 @@ func fetchRipePrefixesCmd() *cobra.Command {
 	cmd.Flags().StringVar(&timestamp, "timestamp", "", "Raw RFC3339 timestamp (e.g. 2026-06-01T08:00:00Z), alternative to --date + --snapshot")
 	cmd.Flags().StringVar(&policy, "policy", "fail", "Write policy: replace, truncate, fail, append")
 	cmd.Flags().StringVar(&database, "database", envOr("MPAT_DATABASE", store.DefaultDatabase), "ClickHouse database name")
+	cmd.Flags().IntVar(&maxRetries, "max-retries", ripe.DefaultMaxRetries, "Maximum number of retry attempts on failure.")
+	cmd.Flags().DurationVar(&retryDelay, "retry-delay", ripe.DefaultRetryDelay, "Duration to wait between retry attempts.")
 
 	return cmd
 }
 
-func runFetchRipePrefixes(ctx context.Context, destTable, database, policy, asnsFlag string, tier1 bool, dateStr, snapshotStr, timestampStr string) error {
+func runFetchRipePrefixes(ctx context.Context, destTable, database, policy, asnsFlag string, tier1 bool, dateStr, snapshotStr, timestampStr string, maxRetries int, retryDelay time.Duration) error {
 	// Validate ASN flags — exactly one of --asns or --tier1 must be set.
 	if asnsFlag == "" && !tier1 {
 		return fmt.Errorf("exactly one of --asns or --tier1 must be set")
@@ -246,7 +252,7 @@ func runFetchRipePrefixes(ctx context.Context, destTable, database, policy, asns
 	if tier1 {
 		asns = ripe.Tier1ASNs
 	} else {
-		for _, s := range strings.Split(asnsFlag, ",") {
+		for s := range strings.SplitSeq(asnsFlag, ",") {
 			s = strings.TrimSpace(s)
 			if s == "" {
 				continue
@@ -272,7 +278,9 @@ func runFetchRipePrefixes(ctx context.Context, destTable, database, policy, asns
 	}
 
 	ripeClient := ripe.NewRipeClient(ripe.RipeConfig{
-		Endpoint: envOr("MPAT_RIPE_STAT_ENDPOINT", ripe.DefaultEndpoint),
+		Endpoint:   envOr("MPAT_RIPE_STAT_ENDPOINT", ripe.DefaultEndpoint),
+		MaxRetries: maxRetries,
+		RetryDelay: retryDelay,
 	})
 
 	dest := store.DatabaseTable{

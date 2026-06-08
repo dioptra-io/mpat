@@ -174,15 +174,26 @@ Exactly one of `--asns` or `--tier1` must be specified to select the ASes to que
 
 #### Flags
 
-| Flag          | Default | Description                                                                      |
-| ------------- | ------- | -------------------------------------------------------------------------------- |
-| `--policy`    | `fail`  | Write policy: `replace`, `truncate`, `fail`, `append`                            |
-| `--database`  | `mpat`  | Destination ClickHouse database                                                  |
-| `--asns`      | —       | Comma-separated list of ASNs (e.g. `3356,1299,3257`)                             |
-| `--tier1`     | `false` | Use the hardcoded list of 16 tier-1 ASNs                                         |
-| `--date`      | —       | Date for the snapshot (e.g. `2026-06-01`), used with `--snapshot`                |
-| `--snapshot`  | `dawn`  | Time of day: `dawn` (08:00 UTC), `day` (16:00 UTC), `night` (00:00 UTC next day) |
-| `--timestamp` | —       | Raw RFC3339 timestamp, alternative to `--date` + `--snapshot`                    |
+| Flag            | Default | Description                                                                      |
+| --------------- | ------- | -------------------------------------------------------------------------------- |
+| `--policy`      | `fail`  | Write policy: `replace`, `truncate`, `fail`, `append`                            |
+| `--database`    | `mpat`  | Destination ClickHouse database                                                  |
+| `--asns`        | —       | Comma-separated list of ASNs (e.g. `3356,1299,3257`)                             |
+| `--tier1`       | `false` | Use the hardcoded list of 16 tier-1 ASNs                                         |
+| `--date`        | —       | Date for the snapshot (e.g. `2026-06-01`), used with `--snapshot`                |
+| `--snapshot`    | `dawn`  | Time of day: `dawn` (08:00 UTC), `day` (16:00 UTC), `night` (00:00 UTC next day) |
+| `--timestamp`   | —       | Raw RFC3339 timestamp, alternative to `--date` + `--snapshot`                    |
+| `--max-retries` | `10`    | Maximum number of retry attempts on failure                                      |
+| `--retry-delay` | `5s`    | Duration to wait between retry attempts                                          |
+
+#### Write Policies
+
+| Policy     | Behaviour                                                |
+| ---------- | -------------------------------------------------------- |
+| `replace`  | Drop destination table if it exists, recreate and insert |
+| `truncate` | Truncate destination table if not empty, then insert     |
+| `fail`     | Fail if destination table is not empty                   |
+| `append`   | Insert into destination regardless of existing data      |
 
 #### Tier-1 ASNs
 
@@ -233,6 +244,14 @@ mp fetch ripe-prefixes ripeprefixes_20260601 \
   --date 2026-06-01 \
   --snapshot day \
   --policy append
+
+# Custom retry configuration
+mp fetch ripe-prefixes ripeprefixes_20260601 \
+  --tier1 \
+  --date 2026-06-01 \
+  --snapshot dawn \
+  --max-retries 5 \
+  --retry-delay 10s
 ```
 
 #### Output table schema
