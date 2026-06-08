@@ -224,8 +224,8 @@ func fetchRipePrefixesCmd() *cobra.Command {
 	cmd.Flags().StringVar(&timestamp, "timestamp", "", "Raw RFC3339 timestamp (e.g. 2026-06-01T08:00:00Z), alternative to --date + --snapshot")
 	cmd.Flags().StringVar(&policy, "policy", "fail", "Write policy: replace, truncate, fail, append")
 	cmd.Flags().StringVar(&database, "database", envOr("MPAT_DATABASE", store.DefaultDatabase), "ClickHouse database name")
-	cmd.Flags().IntVar(&maxRetries, "max-retries", 10, "Maximum number of retry attempts on failure.")
-	cmd.Flags().DurationVar(&retryDelay, "retry-delay", 5*time.Second, "Duration to wait between retry attempts.")
+	cmd.Flags().IntVar(&maxRetries, "max-retries", ripe.DefaultMaxRetries, "Maximum number of retry attempts on failure.")
+	cmd.Flags().DurationVar(&retryDelay, "retry-delay", ripe.DefaultRetryDelay, "Duration to wait between retry attempts.")
 
 	return cmd
 }
