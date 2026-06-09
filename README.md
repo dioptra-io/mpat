@@ -87,25 +87,27 @@ This builds the `mp` binary and installs it to `$GOPATH/bin`.
 
 ### `mp fetch iris-results <dest-table>`
 
-Fetches Iris probe results into a local ClickHouse table. Supports three source selection modes — exactly one must be specified.
+Fetches Iris probe results into a local ClickHouse table. Supports four source selection modes — exactly one must be specified.
 
 By default, only the columns required for downstream computation are fetched (`--lite`). Use `--lite=false` to fetch the full results schema.
 
 #### Flags
 
-| Flag            | Default    | Description                                            |
-| --------------- | ---------- | ------------------------------------------------------ |
-| `--policy`      | `fail`     | Write policy: `replace`, `truncate`, `fail`, `append`  |
-| `--database`    | `mpat`     | Destination ClickHouse database                        |
-| `--lite`        | `true`     | Use ResultsLiteSchema (fewer columns, faster fetch)    |
-| `--chunk-size`  | `500000`   | Number of rows per streaming chunk                     |
-| `--ewma-alpha`  | `0.2`      | Alpha parameter for ETA estimation                     |
-| `--table`       | —          | Mode 1: fetch a specific source table by name          |
-| `--measurement` | —          | Mode 2: fetch all result tables for a measurement UUID |
-| `--from`        | —          | Mode 3: start of date range (RFC3339)                  |
-| `--to`          | —          | Mode 3: end of date range (RFC3339)                    |
-| `--state`       | `finished` | Mode 3: filter measurements by state                   |
-| `--tag`         | —          | Mode 3: filter measurements by tag (regex)             |
+| Flag            | Default    | Description                                                                   |
+| --------------- | ---------- | ----------------------------------------------------------------------------- |
+| `--policy`      | `fail`     | Write policy: `replace`, `truncate`, `fail`, `append`                         |
+| `--database`    | `mpat`     | Destination ClickHouse database                                               |
+| `--lite`        | `true`     | Use ResultsLiteSchema (fewer columns, faster fetch)                           |
+| `--chunk-size`  | `500000`   | Number of rows per streaming chunk                                            |
+| `--ewma-alpha`  | `0.2`      | Alpha parameter for ETA estimation                                            |
+| `--table`       | —          | Mode 1: fetch a specific source table by name                                 |
+| `--measurement` | —          | Mode 2: fetch all result tables for a measurement UUID                        |
+| `--from`        | —          | Mode 3: start of date range (RFC3339)                                         |
+| `--to`          | —          | Mode 3: end of date range (RFC3339)                                           |
+| `--date`        | —          | Mode 4: date to fetch (YYYY-MM-DD), used with `--snapshot`                    |
+| `--snapshot`    | —          | Mode 4: snapshot time: `4am-zeph`, `8am-zeph`, `4pm-zeph`, `8pm-zeph`, `ipv6` |
+| `--state`       | `finished` | Measurement state filter (modes 3 and 4)                                      |
+| `--tag`         | —          | Mode 3: tag regex filter                                                      |
 
 #### Write Policies
 
@@ -150,6 +152,27 @@ mp fetch iris-results my_results \
   --state finished \
   --tag   "zeph" \
   --policy append
+```
+
+#### Mode 4 — By date and snapshot
+
+Fetches measurements for a specific date and snapshot time. Measurements are filtered to the full day (`00:00:00`–`23:59:59 UTC`) and further narrowed by the snapshot tag. `--state` is supported as an optional filter.
+
+```bash
+mp fetch iris-results my_results \
+  --date     2026-06-01 \
+  --snapshot 4am-zeph \
+  --policy   replace
+```
+
+With optional state filter:
+
+```bash
+mp fetch iris-results my_results \
+  --date     2026-06-01 \
+  --snapshot 8pm-zeph \
+  --state    finished \
+  --policy   append
 ```
 
 #### Example output
