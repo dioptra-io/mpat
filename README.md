@@ -105,7 +105,7 @@ By default, only the columns required for downstream computation are fetched (`-
 | `--from`          | —          | Mode 3: start of date range (RFC3339)                                                                              |
 | `--to`            | —          | Mode 3: end of date range (RFC3339)                                                                                |
 | `--date`          | —          | Mode 4: date to fetch (YYYY-MM-DD), used with `--snapshot`                                                         |
-| `--snapshot`      | —          | Mode 4: snapshot time: `4am-zeph`, `8am-zeph`, `4pm-zeph`, `8pm-zeph`, `ipv6`                                      |
+| `--snapshot`      | —          | Mode 4: snapshot time: `2am-zeph`, `8am-zeph`, `2pm-zeph`, `8pm-zeph`, `ipv6`                                      |
 | `--state`         | `finished` | Measurement state filter (modes 3 and 4)                                                                           |
 | `--tag`           | —          | Mode 3: tag regex filter                                                                                           |
 | `--filter-source` | `true`     | Exclude rows whose IP version does not match the snapshot type (zeph → IPv4, ipv6 → IPv6). Only applies to mode 4. |

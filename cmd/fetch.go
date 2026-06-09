@@ -27,16 +27,16 @@ func fetchCmd() *cobra.Command {
 type SnapshotTime string
 
 const (
-	Snapshot4amZeph SnapshotTime = "4am-zeph"
+	Snapshot2amZeph SnapshotTime = "2am-zeph"
 	Snapshot8amZeph SnapshotTime = "8am-zeph"
-	Snapshot4pmZeph SnapshotTime = "4pm-zeph"
+	Snapshot2pmZeph SnapshotTime = "2pm-zeph"
 	Snapshot8pmZeph SnapshotTime = "8pm-zeph"
 	SnapshotIPv6    SnapshotTime = "ipv6"
 )
 
 func (s SnapshotTime) isValid() bool {
 	switch s {
-	case Snapshot4amZeph, Snapshot8amZeph, Snapshot4pmZeph, Snapshot8pmZeph, SnapshotIPv6:
+	case Snapshot2amZeph, Snapshot8amZeph, Snapshot2pmZeph, Snapshot8pmZeph, SnapshotIPv6:
 		return true
 	}
 	return false
@@ -54,6 +54,22 @@ func (s SnapshotTime) ipVersion() uint8 {
 		return 6
 	}
 	return 4
+}
+
+func (s SnapshotTime) targetTime(date time.Time) time.Time {
+	y, m, d := date.Date()
+	switch s {
+	case Snapshot2amZeph:
+		return time.Date(y, m, d, 2, 0, 0, 0, time.UTC)
+	case Snapshot8amZeph:
+		return time.Date(y, m, d, 8, 0, 0, 0, time.UTC)
+	case Snapshot2pmZeph:
+		return time.Date(y, m, d, 14, 0, 0, 0, time.UTC)
+	case Snapshot8pmZeph:
+		return time.Date(y, m, d, 20, 0, 0, 0, time.UTC)
+	default:
+		return time.Time{}
+	}
 }
 
 func fetchIrisResultsCmd() *cobra.Command {
@@ -107,7 +123,7 @@ func fetchIrisResultsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&from, "from", "", "Start date, RFC3339 (mode 3)")
 	cmd.Flags().StringVar(&to, "to", "", "End date, RFC3339 (mode 3)")
 	cmd.Flags().StringVar(&date, "date", "", "Date, YYYY-MM-DD (mode 4)")
-	cmd.Flags().StringVar(&snapshot, "snapshot", "", "Snapshot time: 4am-zeph, 8am-zeph, 4pm-zeph, 8pm-zeph, ipv6 (mode 4)")
+	cmd.Flags().StringVar(&snapshot, "snapshot", "", "Snapshot time: 2am-zeph, 8am-zeph, 2pm-zeph, 8pm-zeph, ipv6 (mode 4)")
 	cmd.Flags().StringVar(&state, "state", "finished", "Measurement state filter (mode 3 and 4)")
 	cmd.Flags().StringVar(&tag, "tag", "", "Tag regex filter (mode 3)")
 	cmd.Flags().IntVar(&chunkSize, "chunk-size", service.DefaultFetchChunkSize, "Streaming chunk size")
@@ -216,7 +232,7 @@ func runFetchIrisResults(ctx context.Context, destTable, database, policy, table
 	case dateStr != "":
 		snap := SnapshotTime(snapshotStr)
 		if !snap.isValid() {
-			return fmt.Errorf("invalid --snapshot value %q: must be one of 4am-zeph, 8am-zeph, 4pm-zeph, 8pm-zeph, ipv6", snapshotStr)
+			return fmt.Errorf("invalid --snapshot value %q: must be one of 2am-zeph, 8am-zeph, 2pm-zeph, 8pm-zeph, ipv6", snapshotStr)
 		}
 		date, err := time.Parse("2006-01-02", dateStr)
 		if err != nil {
@@ -233,9 +249,30 @@ func runFetchIrisResults(ctx context.Context, destTable, database, policy, table
 		if err != nil {
 			return fmt.Errorf("failed to fetch measurements: %w", err)
 		}
-		for _, m := range measurements {
-			for _, g := range iris.TableGroupsForMeasurement(m) {
-				sourceNames = append(sourceNames, g.Results.TableName)
+		if snap == SnapshotIPv6 {
+			for _, m := range measurements {
+				for _, g := range iris.TableGroupsForMeasurement(m) {
+					sourceNames = append(sourceNames, g.Results.TableName)
+				}
+			}
+		} else {
+			target := snap.targetTime(date)
+			var closest *iris.MeasurementRead
+			var closestDiff time.Duration
+			for i := range measurements {
+				diff := measurements[i].CreationTime.Sub(target)
+				if diff < 0 {
+					diff = -diff
+				}
+				if closest == nil || diff < closestDiff {
+					closest = &measurements[i]
+					closestDiff = diff
+				}
+			}
+			if closest != nil {
+				for _, g := range iris.TableGroupsForMeasurement(*closest) {
+					sourceNames = append(sourceNames, g.Results.TableName)
+				}
 			}
 		}
 		if len(sourceNames) == 0 {
