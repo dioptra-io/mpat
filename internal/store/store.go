@@ -231,6 +231,12 @@ func (s *Store) TableSchema(ctx context.Context, dest DatabaseTable) (*schema.Dy
 
 // RowCount returns the number of rows in dest, or 0 if the table does not exist.
 func (s *Store) RowCount(ctx context.Context, dest DatabaseTable) (uint64, error) {
+	return s.RowCountWhere(ctx, dest, "")
+}
+
+// RowCountWhere returns the number of rows in dest matching the optional WHERE clause,
+// or 0 if the table does not exist. The where argument should not include the WHERE keyword.
+func (s *Store) RowCountWhere(ctx context.Context, dest DatabaseTable, where string) (uint64, error) {
 	var exists uint64
 	err := s.QueryRow(ctx,
 		"SELECT count() FROM system.tables WHERE database = ? AND name = ?",
@@ -243,11 +249,13 @@ func (s *Store) RowCount(ctx context.Context, dest DatabaseTable) (uint64, error
 		return 0, nil
 	}
 
+	query := fmt.Sprintf("SELECT count() FROM %s.%s", dest.Database, dest.Table)
+	if where != "" {
+		query += " WHERE " + where
+	}
+
 	var count uint64
-	err = s.QueryRow(ctx,
-		fmt.Sprintf("SELECT count() FROM %s.%s", dest.Database, dest.Table),
-	).Scan(&count)
-	if err != nil {
+	if err := s.QueryRow(ctx, query).Scan(&count); err != nil {
 		return 0, fmt.Errorf("store: failed to count rows: %w", err)
 	}
 	return count, nil

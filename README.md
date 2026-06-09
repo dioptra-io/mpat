@@ -93,21 +93,22 @@ By default, only the columns required for downstream computation are fetched (`-
 
 #### Flags
 
-| Flag            | Default    | Description                                                                   |
-| --------------- | ---------- | ----------------------------------------------------------------------------- |
-| `--policy`      | `fail`     | Write policy: `replace`, `truncate`, `fail`, `append`                         |
-| `--database`    | `mpat`     | Destination ClickHouse database                                               |
-| `--lite`        | `true`     | Use ResultsLiteSchema (fewer columns, faster fetch)                           |
-| `--chunk-size`  | `500000`   | Number of rows per streaming chunk                                            |
-| `--ewma-alpha`  | `0.2`      | Alpha parameter for ETA estimation                                            |
-| `--table`       | —          | Mode 1: fetch a specific source table by name                                 |
-| `--measurement` | —          | Mode 2: fetch all result tables for a measurement UUID                        |
-| `--from`        | —          | Mode 3: start of date range (RFC3339)                                         |
-| `--to`          | —          | Mode 3: end of date range (RFC3339)                                           |
-| `--date`        | —          | Mode 4: date to fetch (YYYY-MM-DD), used with `--snapshot`                    |
-| `--snapshot`    | —          | Mode 4: snapshot time: `4am-zeph`, `8am-zeph`, `4pm-zeph`, `8pm-zeph`, `ipv6` |
-| `--state`       | `finished` | Measurement state filter (modes 3 and 4)                                      |
-| `--tag`         | —          | Mode 3: tag regex filter                                                      |
+| Flag              | Default    | Description                                                                                                        |
+| ----------------- | ---------- | ------------------------------------------------------------------------------------------------------------------ |
+| `--policy`        | `fail`     | Write policy: `replace`, `truncate`, `fail`, `append`                                                              |
+| `--database`      | `mpat`     | Destination ClickHouse database                                                                                    |
+| `--lite`          | `true`     | Use ResultsLiteSchema (fewer columns, faster fetch)                                                                |
+| `--chunk-size`    | `500000`   | Number of rows per streaming chunk                                                                                 |
+| `--ewma-alpha`    | `0.2`      | Alpha parameter for ETA estimation                                                                                 |
+| `--table`         | —          | Mode 1: fetch a specific source table by name                                                                      |
+| `--measurement`   | —          | Mode 2: fetch all result tables for a measurement UUID                                                             |
+| `--from`          | —          | Mode 3: start of date range (RFC3339)                                                                              |
+| `--to`            | —          | Mode 3: end of date range (RFC3339)                                                                                |
+| `--date`          | —          | Mode 4: date to fetch (YYYY-MM-DD), used with `--snapshot`                                                         |
+| `--snapshot`      | —          | Mode 4: snapshot time: `4am-zeph`, `8am-zeph`, `4pm-zeph`, `8pm-zeph`, `ipv6`                                      |
+| `--state`         | `finished` | Measurement state filter (modes 3 and 4)                                                                           |
+| `--tag`           | —          | Mode 3: tag regex filter                                                                                           |
+| `--filter-source` | `true`     | Exclude rows whose IP version does not match the snapshot type (zeph → IPv4, ipv6 → IPv6). Only applies to mode 4. |
 
 #### Write Policies
 

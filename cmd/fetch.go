@@ -49,21 +49,29 @@ func (s SnapshotTime) tag() string {
 	return "zeph"
 }
 
+func (s SnapshotTime) ipVersion() uint8 {
+	if s == SnapshotIPv6 {
+		return 6
+	}
+	return 4
+}
+
 func fetchIrisResultsCmd() *cobra.Command {
 	var (
-		policy      string
-		tableFlag   string
-		measurement string
-		from        string
-		to          string
-		date        string
-		snapshot    string
-		state       string
-		tag         string
-		chunkSize   int
-		ewmaAlpha   float64
-		lite        bool
-		database    string
+		policy       string
+		tableFlag    string
+		measurement  string
+		from         string
+		to           string
+		date         string
+		snapshot     string
+		state        string
+		tag          string
+		chunkSize    int
+		ewmaAlpha    float64
+		lite         bool
+		database     string
+		filterSource bool
 	)
 
 	cmd := &cobra.Command{
@@ -87,6 +95,7 @@ func fetchIrisResultsCmd() *cobra.Command {
 				chunkSize,
 				ewmaAlpha,
 				lite,
+				filterSource,
 			)
 		},
 	}
@@ -104,11 +113,12 @@ func fetchIrisResultsCmd() *cobra.Command {
 	cmd.Flags().IntVar(&chunkSize, "chunk-size", service.DefaultFetchChunkSize, "Streaming chunk size")
 	cmd.Flags().Float64Var(&ewmaAlpha, "ewma-alpha", 0.2, "Alpha parameter for ETA estimation")
 	cmd.Flags().BoolVar(&lite, "lite", true, "Use ResultsLiteSchema instead of ResultsSchema")
+	cmd.Flags().BoolVar(&filterSource, "filter-source", true, "Exclude rows whose IP version does not match the snapshot type (zeph → IPv4, ipv6 → IPv6).")
 
 	return cmd
 }
 
-func runFetchIrisResults(ctx context.Context, destTable, database, policy, tableFlag, measurement, fromStr, toStr, dateStr, snapshotStr, stateStr, tagPattern string, chunkSize int, ewmaAlpha float64, lite bool) error {
+func runFetchIrisResults(ctx context.Context, destTable, database, policy, tableFlag, measurement, fromStr, toStr, dateStr, snapshotStr, stateStr, tagPattern string, chunkSize int, ewmaAlpha float64, lite bool, filterSource bool) error {
 	modes := 0
 	if tableFlag != "" {
 		modes++
@@ -238,11 +248,17 @@ func runFetchIrisResults(ctx context.Context, destTable, database, policy, table
 		Table:    destTable,
 	}
 
+	var ipVersion uint8
+	if filterSource && snapshotStr != "" {
+		ipVersion = SnapshotTime(snapshotStr).ipVersion()
+	}
+
 	svc := service.NewFetchService(s, irisClient, service.FetchConfig{
 		ChunkSize:         chunkSize,
 		PreparationPolicy: store.PreparationPolicy(policy),
 		Lite:              lite,
 		EWMAAlpha:         ewmaAlpha,
+		IPVersion:         ipVersion,
 	})
 
 	return svc.Fetch(ctx, sourceNames, dest)
