@@ -162,7 +162,7 @@ Fetches measurements for a specific date and snapshot time. Measurements are fil
 ```bash
 mp fetch iris-results my_results \
   --date     2026-06-01 \
-  --snapshot 4am-zeph \
+  --snapshot 2am-zeph \
   --policy   replace
 ```
 
