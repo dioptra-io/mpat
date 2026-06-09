@@ -36,20 +36,21 @@ func formatCount(n int64) string {
 }
 
 // countSourceRows queries the row count of a source table on Iris.
-func countSourceRows(client *iris.IrisClient, sourceTable string) (int64, error) {
-	r, err := client.Query().
-		Select(fmt.Sprintf("SELECT count() AS count FROM %s", sourceTable)).
-		Json()
+// The where argument is an optional WHERE clause (without the WHERE keyword).
+func countSourceRows(client *iris.IrisClient, sourceTable string, where string) (int64, error) {
+	query := fmt.Sprintf("SELECT count() AS count FROM %s", sourceTable)
+	if where != "" {
+		query += " WHERE " + where
+	}
+	r, err := client.Query().Select(query).Json()
 	if err != nil {
 		return 0, err
 	}
 	defer r.Close()
-
 	reader, err := decompressIfNeeded(r)
 	if err != nil {
 		return 0, fmt.Errorf("failed to decompress count response: %w", err)
 	}
-
 	var result struct {
 		Count int64 `json:"count"`
 	}

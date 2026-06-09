@@ -31,6 +31,7 @@ type FetchConfig struct {
 	PreparationPolicy store.PreparationPolicy
 	Lite              bool // if true, uses ResultsLiteSchema, otherwise ResultsSchema
 	EWMAAlpha         float64
+	IPVersion         uint8 // 0 = both, 4 = IPv4 only, 6 = IPv6 only
 }
 
 // DefaultFetchConfig returns a FetchConfig with sensible defaults.
@@ -88,8 +89,9 @@ func (f *FetchService) Fetch(ctx context.Context, sourceNames []string, dest sto
 	// Step 1: Pre-scan source tables.
 	tables := make([]tableInfo, 0, len(sourceNames))
 	totalChunks := int64(0)
+	where := f.ipVersionFilter()
 	for _, name := range sourceNames {
-		total, err := countSourceRows(f.irisClient, name)
+		total, err := countSourceRows(f.irisClient, name, where)
 		if err != nil {
 			return fmt.Errorf("fetch: failed to count rows in %s: %w", name, err)
 		}
@@ -154,8 +156,11 @@ func (f *FetchService) Fetch(ctx context.Context, sourceNames []string, dest sto
 				chunkRows = remaining
 			}
 
-			sql := fmt.Sprintf("SELECT %s FROM %s LIMIT %d OFFSET %d",
-				selectCols, t.name, f.config.ChunkSize, offset)
+			sql := fmt.Sprintf("SELECT %s FROM %s", selectCols, t.name)
+			if where != "" {
+				sql += " WHERE " + where
+			}
+			sql += fmt.Sprintf(" LIMIT %d OFFSET %d", f.config.ChunkSize, offset)
 			rows, err := f.irisClient.Query().Select(sql).Json()
 			if err != nil {
 				return fmt.Errorf("[%d/%d] chunk %d: failed to query: %w", i+1, len(tables), c+1, err)
@@ -206,4 +211,13 @@ func (f *FetchService) Fetch(ctx context.Context, sourceNames []string, dest sto
 	)
 
 	return nil
+}
+
+func (f *FetchService) ipVersionFilter() string {
+	switch f.config.IPVersion {
+	case 4, 6:
+		return fmt.Sprintf("ip_version = %d", f.config.IPVersion)
+	default:
+		return ""
+	}
 }
