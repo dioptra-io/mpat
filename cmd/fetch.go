@@ -24,6 +24,31 @@ func fetchCmd() *cobra.Command {
 	return fetchCmd
 }
 
+type SnapshotTime string
+
+const (
+	Snapshot4amZeph SnapshotTime = "4am-zeph"
+	Snapshot8amZeph SnapshotTime = "8am-zeph"
+	Snapshot4pmZeph SnapshotTime = "4pm-zeph"
+	Snapshot8pmZeph SnapshotTime = "8pm-zeph"
+	SnapshotIPv6    SnapshotTime = "ipv6"
+)
+
+func (s SnapshotTime) isValid() bool {
+	switch s {
+	case Snapshot4amZeph, Snapshot8amZeph, Snapshot4pmZeph, Snapshot8pmZeph, SnapshotIPv6:
+		return true
+	}
+	return false
+}
+
+func (s SnapshotTime) tag() string {
+	if s == SnapshotIPv6 {
+		return "ipv6"
+	}
+	return "zeph"
+}
+
 func fetchIrisResultsCmd() *cobra.Command {
 	var (
 		policy      string
@@ -31,6 +56,8 @@ func fetchIrisResultsCmd() *cobra.Command {
 		measurement string
 		from        string
 		to          string
+		date        string
+		snapshot    string
 		state       string
 		tag         string
 		chunkSize   int
@@ -53,6 +80,8 @@ func fetchIrisResultsCmd() *cobra.Command {
 				measurement,
 				from,
 				to,
+				date,
+				snapshot,
 				state,
 				tag,
 				chunkSize,
@@ -68,8 +97,10 @@ func fetchIrisResultsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&measurement, "measurement", "", "Measurement UUID (mode 2)")
 	cmd.Flags().StringVar(&from, "from", "", "Start date, RFC3339 (mode 3)")
 	cmd.Flags().StringVar(&to, "to", "", "End date, RFC3339 (mode 3)")
-	cmd.Flags().StringVar(&state, "state", "finished", "Measurement state filter for mode 3")
-	cmd.Flags().StringVar(&tag, "tag", "", "Tag regex filter for mode 3")
+	cmd.Flags().StringVar(&date, "date", "", "Date, YYYY-MM-DD (mode 4)")
+	cmd.Flags().StringVar(&snapshot, "snapshot", "", "Snapshot time: 4am-zeph, 8am-zeph, 4pm-zeph, 8pm-zeph, ipv6 (mode 4)")
+	cmd.Flags().StringVar(&state, "state", "finished", "Measurement state filter (mode 3 and 4)")
+	cmd.Flags().StringVar(&tag, "tag", "", "Tag regex filter (mode 3)")
 	cmd.Flags().IntVar(&chunkSize, "chunk-size", service.DefaultFetchChunkSize, "Streaming chunk size")
 	cmd.Flags().Float64Var(&ewmaAlpha, "ewma-alpha", 0.2, "Alpha parameter for ETA estimation")
 	cmd.Flags().BoolVar(&lite, "lite", true, "Use ResultsLiteSchema instead of ResultsSchema")
@@ -77,7 +108,7 @@ func fetchIrisResultsCmd() *cobra.Command {
 	return cmd
 }
 
-func runFetchIrisResults(ctx context.Context, destTable, database, policy, tableFlag, measurement, fromStr, toStr, stateStr, tagPattern string, chunkSize int, ewmaAlpha float64, lite bool) error {
+func runFetchIrisResults(ctx context.Context, destTable, database, policy, tableFlag, measurement, fromStr, toStr, dateStr, snapshotStr, stateStr, tagPattern string, chunkSize int, ewmaAlpha float64, lite bool) error {
 	modes := 0
 	if tableFlag != "" {
 		modes++
@@ -88,11 +119,17 @@ func runFetchIrisResults(ctx context.Context, destTable, database, policy, table
 	if fromStr != "" || toStr != "" {
 		modes++
 	}
+	if dateStr != "" || snapshotStr != "" {
+		modes++
+	}
 	if modes != 1 {
-		return fmt.Errorf("exactly one of --table, --measurement, or --from/--to must be set")
+		return fmt.Errorf("exactly one of --table, --measurement, --from/--to, or --date/--snapshot must be set")
 	}
 	if (fromStr == "") != (toStr == "") {
 		return fmt.Errorf("--from and --to must be set together")
+	}
+	if (dateStr == "") != (snapshotStr == "") {
+		return fmt.Errorf("--date and --snapshot must be set together")
 	}
 
 	irisClient, err := iris.NewIrisClient(iris.Config{
@@ -115,7 +152,6 @@ func runFetchIrisResults(ctx context.Context, destTable, database, policy, table
 		return fmt.Errorf("failed to create store: %w", err)
 	}
 
-	// Resolve source table names.
 	var sourceNames []string
 	switch {
 	case tableFlag != "":
@@ -165,6 +201,35 @@ func runFetchIrisResults(ctx context.Context, destTable, database, policy, table
 		}
 		if len(sourceNames) == 0 {
 			return fmt.Errorf("no results tables found in range %s to %s", fromStr, toStr)
+		}
+
+	case dateStr != "":
+		snap := SnapshotTime(snapshotStr)
+		if !snap.isValid() {
+			return fmt.Errorf("invalid --snapshot value %q: must be one of 4am-zeph, 8am-zeph, 4pm-zeph, 8pm-zeph, ipv6", snapshotStr)
+		}
+		date, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			return fmt.Errorf("invalid --date value %q: must be YYYY-MM-DD", dateStr)
+		}
+		start := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
+		end := time.Date(date.Year(), date.Month(), date.Day(), 23, 59, 59, 0, time.UTC)
+		q := irisClient.Measurements().Between(start, end)
+		if stateStr != "" {
+			q = q.State(iris.MeasurementAgentState(stateStr))
+		}
+		q = q.TagContains(snap.tag())
+		measurements, err := q.Fetch()
+		if err != nil {
+			return fmt.Errorf("failed to fetch measurements: %w", err)
+		}
+		for _, m := range measurements {
+			for _, g := range iris.TableGroupsForMeasurement(m) {
+				sourceNames = append(sourceNames, g.Results.TableName)
+			}
+		}
+		if len(sourceNames) == 0 {
+			return fmt.Errorf("no results tables found for date %s snapshot %s", dateStr, snapshotStr)
 		}
 	}
 
