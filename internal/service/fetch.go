@@ -215,8 +215,10 @@ func (f *FetchService) Fetch(ctx context.Context, sourceNames []string, dest sto
 
 func (f *FetchService) ipVersionFilter() string {
 	switch f.config.IPVersion {
-	case 4, 6:
-		return fmt.Sprintf("ip_version = %d", f.config.IPVersion)
+	case 4:
+		return "startsWith(toString(probe_src_addr), '::ffff:')"
+	case 6:
+		return "NOT startsWith(toString(probe_src_addr), '::ffff:')"
 	default:
 		return ""
 	}
