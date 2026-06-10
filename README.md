@@ -93,22 +93,23 @@ By default, only the columns required for downstream computation are fetched (`-
 
 #### Flags
 
-| Flag              | Default    | Description                                                                                                        |
-| ----------------- | ---------- | ------------------------------------------------------------------------------------------------------------------ |
-| `--policy`        | `fail`     | Write policy: `replace`, `truncate`, `fail`, `append`                                                              |
-| `--database`      | `mpat`     | Destination ClickHouse database                                                                                    |
-| `--lite`          | `true`     | Use ResultsLiteSchema (fewer columns, faster fetch)                                                                |
-| `--chunk-size`    | `500000`   | Number of rows per streaming chunk                                                                                 |
-| `--ewma-alpha`    | `0.2`      | Alpha parameter for ETA estimation                                                                                 |
-| `--table`         | —          | Mode 1: fetch a specific source table by name                                                                      |
-| `--measurement`   | —          | Mode 2: fetch all result tables for a measurement UUID                                                             |
-| `--from`          | —          | Mode 3: start of date range (RFC3339)                                                                              |
-| `--to`            | —          | Mode 3: end of date range (RFC3339)                                                                                |
-| `--date`          | —          | Mode 4: date to fetch (YYYY-MM-DD), used with `--snapshot`                                                         |
-| `--snapshot`      | —          | Mode 4: snapshot time: `2am-zeph`, `8am-zeph`, `2pm-zeph`, `8pm-zeph`, `ipv6`                                      |
-| `--state`         | `finished` | Measurement state filter (modes 3 and 4)                                                                           |
-| `--tag`           | —          | Mode 3: tag regex filter                                                                                           |
-| `--filter-source` | `true`     | Exclude rows whose IP version does not match the snapshot type (zeph → IPv4, ipv6 → IPv6). Only applies to mode 4. |
+| Flag              | Default    | Description                                                                                               |
+| ----------------- | ---------- | --------------------------------------------------------------------------------------------------------- |
+| `--policy`        | `fail`     | Write policy: `replace`, `truncate`, `fail`, `append`                                                     |
+| `--database`      | `mpat`     | Destination ClickHouse database                                                                           |
+| `--lite`          | `true`     | Use ResultsLiteSchema (fewer columns, faster fetch)                                                       |
+| `--chunk-size`    | `500000`   | Number of rows per streaming chunk                                                                        |
+| `--ewma-alpha`    | `0.2`      | Alpha parameter for ETA estimation                                                                        |
+| `--table`         | —          | Mode 1: fetch a specific source table by name                                                             |
+| `--measurement`   | —          | Mode 2: fetch all result tables for a measurement UUID                                                    |
+| `--from`          | —          | Mode 3: start of date range (RFC3339)                                                                     |
+| `--to`            | —          | Mode 3: end of date range (RFC3339)                                                                       |
+| `--date`          | —          | Mode 4: date to fetch (YYYY-MM-DD), used with `--kind` and `--index`                                      |
+| `--kind`          | —          | Mode 4: measurement kind: `zeph` (IPv4) or `ipv6` (required)                                              |
+| `--index`         | —          | Mode 4: 0-based index of the measurement to fetch, ordered by creation time (required)                    |
+| `--state`         | `finished` | Measurement state filter (modes 3 and 4)                                                                  |
+| `--tag`           | —          | Mode 3: tag regex filter                                                                                  |
+| `--filter-source` | `true`     | Exclude rows whose IP version does not match the kind (zeph → IPv4, ipv6 → IPv6). Only applies to mode 4. |
 
 #### Write Policies
 
@@ -155,25 +156,29 @@ mp fetch iris-results my_results \
   --policy append
 ```
 
-#### Mode 4 — By date and snapshot
+#### Mode 4 — By date, kind, and index
 
-Fetches measurements for a specific date and snapshot time. Measurements are filtered to the full day (`00:00:00`–`23:59:59 UTC`) and further narrowed by the snapshot tag. `--state` is supported as an optional filter.
+Fetches a specific measurement for a given date. All measurements for the day are retrieved and filtered by `--kind`, then sorted by creation time. `--index 0` selects the first measurement, `--index 1` the second, and so on. An error is returned if the index is out of bounds.
+
+`--kind` also determines the IP version filter: `zeph` → IPv4, `ipv6` → IPv6. `--state` is supported as an optional filter.
 
 ```bash
 mp fetch iris-results my_results \
-  --date     2026-06-01 \
-  --snapshot 2am-zeph \
-  --policy   replace
+  --date   2026-06-01 \
+  --kind   zeph \
+  --index  0 \
+  --policy replace
 ```
 
 With optional state filter:
 
 ```bash
 mp fetch iris-results my_results \
-  --date     2026-06-01 \
-  --snapshot 8pm-zeph \
-  --state    finished \
-  --policy   append
+  --date   2026-06-01 \
+  --kind   ipv6 \
+  --index  1 \
+  --state  finished \
+  --policy append
 ```
 
 #### Example output
