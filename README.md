@@ -18,6 +18,7 @@ Internet Measurement Platforms (IMPs) such as [Iris](https://iris.dioptra.io) co
 
 - A client for the Iris measurement platform API.
 - A client for the RIPE Stat Data API for fetching BGP prefix data.
+- A client for the Retina live stream API for consuming FIEs in real time.
 - A high-throughput pipeline for fetching probe results into a local ClickHouse instance.
 - A computation pipeline for deriving higher-level structures such as Forwarding Info Elements (FIEs) from raw probe results.
 - A flexible query interface for filtering measurements by state, date range, and tag.
@@ -30,6 +31,7 @@ MPAT is structured around the following internal packages:
 
 - **`internal/iris`** — Client for the Iris API. Handles JWT authentication, measurement queries, and ClickHouse result retrieval via HTTP streaming.
 - **`internal/ripe`** — Client for the RIPE Stat Data API. Handles BGP prefix queries using a builder pattern, with support for historical snapshots via time-of-day or raw timestamp.
+- **`internal/retina`** — Client for the Retina live stream API. Handles NDJSON streaming and batch delivery of Forwarding Info Elements.
 - **`internal/store`** — Low-level client for the local ClickHouse instance. Handles table creation, write policies, and bulk insertion.
 - **`internal/schema`** — Schema definitions for all supported table types (`results`, `resultslite`, `fies`, `ripeprefixes`). Provides schema introspection, compatibility checking, DDL rendering, and DDL parsing via the AfterShip ClickHouse SQL parser.
 - **`internal/service`** — Business logic for fetch and compute operations. Each service owns its SQL templates and orchestrates store and client interactions.
@@ -37,16 +39,18 @@ MPAT is structured around the following internal packages:
 Data flows as follows:
 
 ```
-Iris ClickHouse      →  mp fetch iris-results (HTTP stream)  →  Local ClickHouse
-                                                                       ↓
-                                                              mp compute fies
-                                                                       ↓
-                                                         Derived tables (e.g. FIEs)
+Iris ClickHouse      →  mp fetch iris-results (HTTP stream)       →  Local ClickHouse
+                                                                           ↓
+                                                                  mp compute fies
+                                                                           ↓
+                                                             Derived tables (e.g. FIEs)
 
-RIPE Stat API        →  mp fetch ripe-prefixes (native insert)  →  Local ClickHouse
+RIPE Stat API        →  mp fetch ripe-prefixes (native insert)    →  Local ClickHouse
+
+Retina Stream API    →  mp fetch retina-fies (NDJSON stream)      →  Local ClickHouse
 ```
 
-No intermediate deserialization occurs during Iris fetch — the JSON stream is piped directly into ClickHouse. RIPE prefix data is inserted via the native ClickHouse driver. Compute operations run entirely server-side within ClickHouse.
+No intermediate deserialization occurs during Iris fetch — the JSON stream is piped directly into ClickHouse. RIPE prefix data is inserted via the native ClickHouse driver. Retina FIEs are streamed as NDJSON, deserialized, and inserted in batches. Compute operations run entirely server-side within ClickHouse.
 
 ---
 
@@ -295,6 +299,72 @@ mp fetch ripe-prefixes ripeprefixes_20260601 \
 | `fetched_at` | `DateTime` | Time at which the data was fetched               |
 
 The table is ordered by `(asn, network, prefix_len)` for efficient per-ASN queries and prefix lookups. It is designed to work with ClickHouse's `IP_TRIE` dictionary layout for fast prefix matching against other tables.
+
+---
+
+### `mp fetch retina-fies <dest-table>`
+
+Streams Forwarding Info Elements (FIEs) from the Retina live stream API and inserts them into a local ClickHouse table. FIEs are delivered as a continuous NDJSON stream and inserted in batches. If `--timeout` is set, the stream is stopped after the given duration and any accumulated FIEs are flushed before exit.
+
+#### Flags
+
+| Flag           | Default                                | Description                                           |
+| -------------- | -------------------------------------- | ----------------------------------------------------- |
+| `--policy`     | `fail`                                 | Write policy: `replace`, `truncate`, `fail`, `append` |
+| `--timeout`    | `0`                                    | Stream duration; `0` means stream until EOF           |
+| `--endpoint`   | `http://iprl.dioptra.io/api/v1/stream` | Retina stream endpoint URL                            |
+| `--batch-size` | `1000`                                 | Number of FIEs to accumulate per insert batch         |
+
+#### Write Policies
+
+| Policy     | Behaviour                                                |
+| ---------- | -------------------------------------------------------- |
+| `replace`  | Drop destination table if it exists, recreate and insert |
+| `truncate` | Truncate destination table if not empty, then insert     |
+| `fail`     | Fail if destination table is not empty                   |
+| `append`   | Insert into destination regardless of existing data      |
+
+#### Examples
+
+```bash
+# Stream for 30 seconds into a new table
+mp fetch retina-fies retina_fies_20260611 \
+  --timeout 30s \
+  --policy replace
+
+# Stream indefinitely, appending to an existing table
+mp fetch retina-fies retina_fies_20260611 \
+  --policy append
+
+# Custom endpoint and batch size
+mp fetch retina-fies retina_fies_20260611 \
+  --endpoint http://my-retina-instance/api/v1/stream \
+  --batch-size 500 \
+  --policy replace
+```
+
+#### Output table schema
+
+| Column                    | Type       | Description                                |
+| ------------------------- | ---------- | ------------------------------------------ |
+| `sequence_number`         | `UInt64`   | Globally unique monotonic FIE identifier   |
+| `agent_id`                | `IPv6`     | Probing agent address                      |
+| `probing_directive_id`    | `UInt32`   | Directive that triggered this FIE          |
+| `ip_version`              | `UInt8`    | IP version: `4` or `6`                     |
+| `protocol`                | `UInt8`    | Probe protocol (ICMP=1, UDP=17, ICMPv6=58) |
+| `source_address`          | `IPv6`     | Probe source address                       |
+| `destination_address`     | `IPv6`     | Probe destination address                  |
+| `near_probe_ttl`          | `UInt8`    | TTL of the near hop                        |
+| `near_reply_address`      | `IPv6`     | Reply address at near TTL                  |
+| `near_sent_timestamp`     | `DateTime` | Probe send time at near TTL                |
+| `near_received_timestamp` | `DateTime` | Reply receive time at near TTL             |
+| `far_probe_ttl`           | `UInt8`    | TTL of the far hop                         |
+| `far_reply_address`       | `IPv6`     | Reply address at far TTL                   |
+| `far_sent_timestamp`      | `DateTime` | Probe send time at far TTL                 |
+| `far_received_timestamp`  | `DateTime` | Reply receive time at far TTL              |
+| `production_timestamp`    | `DateTime` | Time at which this FIE was produced        |
+
+The table is ordered by `(near_reply_address, destination_address, agent_id, production_timestamp)`, matching the `mp compute fies` output schema and making the two sources directly interchangeable for downstream queries.
 
 ---
 
