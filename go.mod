@@ -1,10 +1,11 @@
 module github.com/dioptra-io/ufuk-research
 
-go 1.24.0
+go 1.24.4
 
 require (
 	github.com/AfterShip/clickhouse-sql-parser v0.5.1
 	github.com/ClickHouse/clickhouse-go/v2 v2.37.1
+	github.com/dioptra-io/retina-commons v1.0.0
 	github.com/spf13/cobra v1.8.1
 )
 

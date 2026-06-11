@@ -11,5 +11,6 @@ func fetchCmd() *cobra.Command {
 	}
 	fetchCmd.AddCommand(fetchIrisResultsCmd())
 	fetchCmd.AddCommand(fetchRipePrefixesCmd())
+	fetchCmd.AddCommand(fetchRetinaFIEsCmd())
 	return fetchCmd
 }
