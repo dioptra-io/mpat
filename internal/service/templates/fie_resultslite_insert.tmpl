@@ -25,32 +25,50 @@ WITH aggregated AS (
         probe_protocol, probe_src_addr, probe_dst_prefix,
         probe_dst_addr, probe_src_port, probe_dst_port,
         probe_ttl
+),
+pairs AS (
+    SELECT
+        near.probe_protocol    AS probe_protocol,
+        near.probe_src_addr    AS probe_src_addr,
+        near.probe_dst_prefix  AS probe_dst_prefix,
+        near.probe_dst_addr    AS probe_dst_addr,
+        near.probe_src_port    AS probe_src_port,
+        near.probe_dst_port    AS probe_dst_port,
+        near.probe_ttl         AS near_probe_ttl,
+        near.reply_addrs       AS near_reply_addrs,
+        near.capture_timestamp AS near_capture_timestamp,
+        near.rtt               AS near_rtt,
+        far.probe_ttl          AS far_probe_ttl,
+        far.reply_addrs        AS far_reply_addrs,
+        far.capture_timestamp  AS far_capture_timestamp,
+        far.rtt                AS far_rtt
+    FROM aggregated AS near
+    LEFT JOIN aggregated AS far
+        ON  near.probe_protocol = far.probe_protocol
+        AND near.probe_src_addr = far.probe_src_addr
+        AND near.probe_dst_prefix = far.probe_dst_prefix
+        AND near.probe_dst_addr = far.probe_dst_addr
+        AND near.probe_src_port = far.probe_src_port
+        AND near.probe_dst_port = far.probe_dst_port
+        AND far.probe_ttl = near.probe_ttl + 1
+    WHERE {{.NullityCondition}}
+      AND {{.CardinalityCondition}}
 )
 SELECT
     rowNumberInAllBlocks() + (SELECT count() FROM {{.DestDatabase}}.{{.DestTable}}) AS sequence_number,
-    near.probe_src_addr                                                               AS agent_id,
+    probe_src_addr                                                                    AS agent_id,
     0                                                                                 AS probing_directive_id,
-    if(isIPv4String(toString(near.probe_dst_addr)), 4, 6)                             AS ip_version,
-    near.probe_protocol                                                               AS protocol,
-    near.probe_src_addr                                                               AS source_address,
-    near.probe_dst_addr                                                               AS destination_address,
-    near.probe_ttl                                                                    AS near_probe_ttl,
-    near.reply_addrs[1]                                                               AS near_reply_address,
-    near.capture_timestamp                                                            AS near_sent_timestamp,
-    near.capture_timestamp + INTERVAL (near.rtt * {{.RTTResolution}}) MILLISECOND    AS near_received_timestamp,
-    far.probe_ttl                                                                     AS far_probe_ttl,
-    far.reply_addrs[1]                                                                AS far_reply_address,
-    far.capture_timestamp                                                             AS far_sent_timestamp,
-    far.capture_timestamp + INTERVAL (far.rtt * {{.RTTResolution}}) MILLISECOND      AS far_received_timestamp,
+    if(isIPv4String(toString(probe_dst_addr)), 4, 6)                                  AS ip_version,
+    probe_protocol                                                                    AS protocol,
+    probe_src_addr                                                                    AS source_address,
+    probe_dst_addr                                                                    AS destination_address,
+    near_probe_ttl                                                                    AS near_probe_ttl,
+    arrayJoin(near_reply_addrs)                                                       AS near_reply_address,
+    near_capture_timestamp                                                            AS near_sent_timestamp,
+    near_capture_timestamp + INTERVAL (near_rtt * {{.RTTResolution}}) MILLISECOND    AS near_received_timestamp,
+    far_probe_ttl                                                                     AS far_probe_ttl,
+    arrayJoin(if(empty(far_reply_addrs), [toIPv6('::')], far_reply_addrs))            AS far_reply_address,
+    far_capture_timestamp                                                             AS far_sent_timestamp,
+    far_capture_timestamp + INTERVAL (far_rtt * {{.RTTResolution}}) MILLISECOND      AS far_received_timestamp,
     now()                                                                             AS production_timestamp
-FROM aggregated AS near
-JOIN aggregated AS far
-    ON  near.probe_protocol = far.probe_protocol
-    AND near.probe_src_addr = far.probe_src_addr
-    AND near.probe_dst_prefix = far.probe_dst_prefix
-    AND near.probe_dst_addr = far.probe_dst_addr
-    AND near.probe_src_port = far.probe_src_port
-    AND near.probe_dst_port = far.probe_dst_port
-    AND far.probe_ttl = near.probe_ttl + 1
-WHERE length(near.reply_addrs) = 1
-  AND length(far.reply_addrs) = 1
+FROM pairs

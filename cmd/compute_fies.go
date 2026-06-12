@@ -15,8 +15,9 @@ func computeResultsFiesCmd() *cobra.Command {
 		policy        string
 		chunkSize     int
 		rttResolution float64
+		cardinality   string
+		nullity       string
 	)
-
 	cmd := &cobra.Command{
 		Use:   "fies <input-table> <output-table>",
 		Short: "Compute forwarding info elements from iris results",
@@ -29,18 +30,20 @@ func computeResultsFiesCmd() *cobra.Command {
 				policy,
 				chunkSize,
 				rttResolution,
+				cardinality,
+				nullity,
 			)
 		},
 	}
-
 	cmd.Flags().StringVar(&policy, "policy", "append", "Write policy: replace, truncate, fail, append")
 	cmd.Flags().IntVar(&chunkSize, "chunk-size", service.DefaultFIEChunkSize, "Number of destination prefixes per chunk")
 	cmd.Flags().Float64Var(&rttResolution, "rtt-resolution", service.DefaultFIERTTResolution, "RTT resolution in milliseconds")
-
+	cmd.Flags().StringVar(&cardinality, "cardinality", string(service.CardinalityOneToOne), "Cardinality policy: one_to_one, many_to_one, one_to_many, all")
+	cmd.Flags().StringVar(&nullity, "nullity", string(service.NullityBothSome), "Nullity policy: both_some, far_none, any")
 	return cmd
 }
 
-func runResultsFies(ctx context.Context, inputTable, outputTable, policy string, chunkSize int, rttResolution float64) error {
+func runResultsFies(ctx context.Context, inputTable, outputTable, policy string, chunkSize int, rttResolution float64, cardinality, nullity string) error {
 	log := slog.Default()
 
 	config, err := store.ConfigFromDSN(mustEnv("MPAT_CLICKHOUSE"))
@@ -66,6 +69,8 @@ func runResultsFies(ctx context.Context, inputTable, outputTable, policy string,
 		ChunkSize:         chunkSize,
 		RTTResolution:     rttResolution,
 		PreparationPolicy: store.PreparationPolicy(policy),
+		Cardinality:       service.CardinalityPolicy(cardinality),
+		Nullity:           service.NullityPolicy(nullity),
 	})
 
 	log.InfoContext(ctx, "starting fie computation",
@@ -74,6 +79,8 @@ func runResultsFies(ctx context.Context, inputTable, outputTable, policy string,
 		"policy", policy,
 		"chunk_size", chunkSize,
 		"rtt_resolution", rttResolution,
+		"cardinality", cardinality,
+		"nullity", nullity,
 	)
 
 	if err := svc.Compute(ctx, source, dest); err != nil {

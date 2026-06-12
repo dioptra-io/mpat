@@ -372,23 +372,76 @@ The table is ordered by `(near_reply_address, destination_address, agent_id, pro
 
 Computes Forwarding Info Elements (FIEs) from a raw Iris results table and writes them into a destination ClickHouse table. The computation runs entirely server-side within ClickHouse using keyset-paginated chunks, with no data movement through the client.
 
-A FIE represents an observed forwarding step between two consecutive TTL hops within the same flow. Given a flow with probe TTL values `h` and `h+1`, a FIE captures the near router (at TTL `h`) and the far router (at TTL `h+1`) along with their associated timestamps and reply addresses. Only flows where each TTL hop has exactly one distinct reply address are included (skip policy).
+A FIE represents an observed forwarding step between two consecutive TTL hops `h` and `h+1` within the same flow. Given a flow with probe TTL values `h` and `h+1`, a FIE captures the near router (at TTL `h`) and the far router (at TTL `h+1`) along with their associated timestamps and reply addresses. The set of included FIEs is controlled by two independent filtering policies: a **cardinality policy** (how many distinct reply addresses are allowed per hop) and a **nullity policy** (whether hops with a missing far reply are included). The default behavior (`--cardinality one_to_one --nullity both_some`) preserves the original semantics: only flows where each hop has exactly one distinct reply address are included.
 
 Both `results` and `resultslite` source schemas are supported. The appropriate computation template is selected automatically based on the source table's schema.
 
 #### Flags
 
-| Flag               | Default   | Description                                           |
-| ------------------ | --------- | ----------------------------------------------------- |
-| `--policy`         | `append`  | Write policy: `replace`, `truncate`, `fail`, `append` |
-| `--database`       | `mpat`    | Destination ClickHouse database                       |
-| `--chunk-size`     | `1000000` | Number of destination prefixes per chunk              |
-| `--rtt-resolution` | `0.1`     | RTT resolution in milliseconds (Iris default: `0.1`)  |
+| Flag               | Default      | Description                                                           |
+| ------------------ | ------------ | --------------------------------------------------------------------- |
+| `--policy`         | `append`     | Write policy: `replace`, `truncate`, `fail`, `append`                 |
+| `--chunk-size`     | `1000000`    | Number of destination prefixes per chunk                              |
+| `--rtt-resolution` | `0.1`        | RTT resolution in milliseconds (Iris default: `0.1`)                  |
+| `--cardinality`    | `one_to_one` | Cardinality policy: `one_to_one`, `many_to_one`, `one_to_many`, `all` |
+| `--nullity`        | `both_some`  | Nullity policy: `both_some`, `far_none`, `any`                        |
 
-#### Example
+#### Filtering Policies
+
+Two independent policies control which hop pairs are included in the output.
+
+**Cardinality policy** — constrains the number of distinct reply addresses per hop:
+
+| Value         | Near replies | Far replies           |
+| ------------- | ------------ | --------------------- |
+| `one_to_one`  | exactly 1    | exactly 1 (or absent) |
+| `many_to_one` | any          | exactly 1 (or absent) |
+| `one_to_many` | exactly 1    | any                   |
+| `all`         | any          | any                   |
+
+**Nullity policy** — controls whether hops with a missing or empty far reply are included:
+
+| Value       | Behavior                                             |
+| ----------- | ---------------------------------------------------- |
+| `both_some` | Far hop must have at least one reply address         |
+| `far_none`  | Far hop must have no reply address (missing h+1 hop) |
+| `any`       | Far hop presence is not constrained                  |
+
+Note: combining `far_none` with `one_to_one` or `many_to_one` is rejected as contradictory — those cardinality policies require the far side to be non-empty, which conflicts with `far_none`.
+
+When the cardinality policy is `one_to_one` or `many_to_one` and the nullity policy allows a missing far hop (`any`), the cardinality constraint is applied tolerantly: a missing far hop (zero replies) is allowed through, and only non-empty far hops are constrained to have exactly one reply.
+
+When cardinality is `all` and nullity is `any`, all hop pairs are included and the near and far reply arrays are fully exploded into a cartesian product of rows.
+
+#### Write Policies
+
+| Policy     | Behaviour                                                |
+| ---------- | -------------------------------------------------------- |
+| `replace`  | Drop destination table if it exists, recreate and insert |
+| `truncate` | Truncate destination table if not empty, then insert     |
+| `fail`     | Fail if destination table is not empty                   |
+| `append`   | Insert into destination regardless of existing data      |
+
+#### Examples
 
 ```bash
+# Default behavior: one_to_one cardinality, both_some nullity (original semantics)
 mp compute fies iris_resultslite__20260601 iris_fies__20260601
+
+# Keep all pairs including missing far hops, one reply per hop
+mp compute fies iris_resultslite__20260601 iris_fies__20260601 \
+  --cardinality one_to_one \
+  --nullity any
+
+# Keep all pairs, full cartesian product on multi-reply hops
+mp compute fies iris_resultslite__20260601 iris_fies__20260601 \
+  --cardinality all \
+  --nullity any
+
+# Only pairs where far hop has no reply (missing h+1)
+mp compute fies iris_resultslite__20260601 iris_fies__20260601 \
+  --cardinality one_to_many \
+  --nullity far_none
 ```
 
 #### Example output
